@@ -20,10 +20,7 @@ void PluginInit()  {
 	g_Module.ScriptInfo.SetAuthor( "w00tguy" );
 	g_Module.ScriptInfo.SetContactInfo( "https://github.com/wootguy" );
 	
-	g_Hooks.RegisterHook( Hooks::Player::ClientPutInServer, @ClientJoin );
-	//g_Hooks.RegisterHook( Hooks::Player::ClientDisconnect, @ClientLeave );
-	//g_Hooks.RegisterHook( Hooks::Game::MapChange, @MapChange );
-	
+	g_Hooks.RegisterHook( Hooks::Player::ClientPutInServer, @ClientJoin );	
 	g_Hooks.RegisterHook( Hooks::Player::PlayerPostThink, @PlayerPostThink );
 	
 	last_player_use.resize(33);
@@ -76,7 +73,6 @@ void check_for_crashed_players() {
 		
 		if (isLagging) {
 			Vector spritePos = plr.pev.origin + Vector(0,0,44);
-			//Vector spritePos = plr.pev.origin;
 		
 			if (loading_sprites[i].IsValid()) {
 				CBaseEntity@ loadSprite = loading_sprites[i];
@@ -149,19 +145,7 @@ void detect_when_loaded(EHandle h_plr, float startTime, int consecutivePings) {
 }
 
 HookReturnCode ClientJoin(CBasePlayer@ plr)
-{
-	/*
-	string steamId = getUniqueId(plr);
-	
-	for (uint i = 0; i < level_change_players.size(); i++) {
-		if (level_change_players[i].steamid == steamId) {
-			println(level_change_players[i].name + " did NOT leave during level change");
-			level_change_players.removeAt(i);
-			break;
-		}
-	}
-	*/
-	
+{	
 	bool isListenServerHost = g_PlayerFuncs.AdminLevel(plr) == ADMIN_OWNER && !g_EngineFuncs.IsDedicatedServer();
 	
 	if (!isListenServerHost) {
@@ -193,74 +177,3 @@ HookReturnCode PlayerPostThink(CBasePlayer@ plr) {
 	
 	return HOOK_CONTINUE;
 }
-
-
-
-/*
-class PlayerInfo {
-	string name;
-	string steamid;
-}
-
-bool finishedTransition = true;
-array<PlayerInfo> level_change_players; // check if these players leave during the level change
-
-HookReturnCode MapChange()
-{
-	if (!finishedTransition) {
-		println("LEVEL CHANGE (IGNORED)");
-		return HOOK_CONTINUE;
-	}
-	
-	println("LEVEL CHANGE");
-	
-	finishedTransition = false;
-	
-	level_change_players.resize(0);
-	
-	for ( int i = 1; i <= g_Engine.maxClients; i++ )
-	{
-		CBasePlayer@ plr = g_PlayerFuncs.FindPlayerByIndex(i);
-		if (plr is null or !plr.IsConnected())
-			continue;
-		
-		PlayerInfo info;
-		info.name = plr.pev.netname;
-		info.steamid = getUniqueId(plr);
-		
-		level_change_players.insertLast(info);
-		
-		println("MAP CHANGE ID: " + info.steamid);
-	}
-	
-	println("TOTAL IDS: " + level_change_players.size());
-	
-	return HOOK_CONTINUE;
-}
-
-void monitor_level_change_leavers() {
-	println("MONITOR " + level_change_players.size());
-	
-	finishedTransition = true;
-	
-	if (level_change_players.size() == 0) {
-		println("ABANDOME NMONITOE");
-		return;
-	}
-
-	if (g_Engine.time > 5) {
-		for (uint i = 0; i < level_change_players.size(); i++) {
-			println(level_change_players[i].name + " probably left during level change");
-		}
-		return;
-	}
-
-	g_Scheduler.SetTimeout("monitor_level_change_leavers", 0.1f);
-}
-
-void MapActivate() {
-	println("MAP ACTIVATE");
-	
-	g_Scheduler.SetTimeout("monitor_level_change_leavers", 5.0f); // wait a while in case level change hook trigger multiple times
-}
-*/
