@@ -65,7 +65,7 @@ void check_for_crashed_players() {
 		if (lastPacket > disconnect_message_time) {
 			if (lag_state[i] == 0) {
 				lag_state[i] = 1;
-				g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " lost connection to the server\n");
+				g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " lost connection to the server.\n");
 			}
 		} else {
 			
@@ -133,7 +133,8 @@ void detect_when_loaded(EHandle h_plr, float startTime, int consecutivePings) {
 		float lastPacketTime = g_Engine.time - last_player_use[plr.entindex()];
 		if (lastPacketTime < 0.5f && ++consecutivePings >= 5) {
 			int loadTime = int((g_Engine.time - startTime) + 0.5f);		
-			g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " fully loaded into the game after " + loadTime + " seconds\n");
+			string plural = loadTime != 1 ? "s" : "";
+			g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " has finished loading.\n");
 			lag_state[plr.entindex()] = 0;
 			return;
 		}
@@ -170,7 +171,7 @@ HookReturnCode PlayerPostThink(CBasePlayer@ plr) {
 		lag_state[plr.entindex()] = 0;
 		int dur = int(g_Engine.time - last_player_use[plr.entindex()] + 0.5f);
 		string a_or_an = (dur == 8 || dur == 11) ? "an " : "a ";
-		g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " recovered from " + a_or_an + dur + " second lag spike\n");
+		g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " recovered from " + a_or_an + dur + " second lag spike.\n");
 	}
 
 	last_player_use[plr.entindex()] = g_Engine.time;
