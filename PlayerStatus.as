@@ -1,10 +1,17 @@
 void print(string text) { g_Game.AlertMessage( at_console, text); }
 void println(string text) { print(text + "\n"); }
 
+enum LAG_STATES {
+	LAG_NONE,
+	LAG_SEVERE_MSG,
+	LAG_JOINING
+}
+
 array<float> last_player_use; // last time playerUse function was called for player (no calls = packet loss or not connected)
 array<EHandle> loading_sprites;
 array<RenderInfo> render_info;
 array<int> lag_state; // 1 = message sent that the player crashed, -1 = joining the game
+array<bool> rendermode_applied; // 1 = message sent that the player crashed, -1 = joining the game
 
 float disconnect_message_time = 3.0f; // player considered disconnected after this many seconds
 
@@ -14,7 +21,8 @@ class RenderInfo {
 	float renderamt;
 }
 
-string loading_spr = "sprites/loading.spr";
+string loading_spr = "sprites/hourglass_v3.spr";
+float loading_spr_framerate = 10; // max of 15 fps before frames are dropped
 
 void PluginInit()  {
 	g_Module.ScriptInfo.SetAuthor( "w00tguy" );
@@ -27,12 +35,16 @@ void PluginInit()  {
 	loading_sprites.resize(33);
 	render_info.resize(33);
 	lag_state.resize(33);
+	rendermode_applied.resize(33);
 	
-	g_Scheduler.SetInterval("check_for_crashed_players", 0.05f, -1);
+	g_Scheduler.SetInterval("check_for_crashed_players", 0.1f, -1);
 }
 
 void MapInit() {
 	g_Game.PrecacheModel(loading_spr);
+	
+	rendermode_applied.resize(0);
+	rendermode_applied.resize(33);
 }
 
 string getUniqueId(CBasePlayer@ plr) {
@@ -52,19 +64,19 @@ void check_for_crashed_players() {
 		
 		if (plr is null or !plr.IsConnected()) {
 			g_EntityFuncs.Remove(loading_sprites[i]);
-			if (lag_state[i] == 1) {
-				lag_state[i] = 0;
+			if (lag_state[i] != LAG_NONE) {
+				lag_state[i] = LAG_NONE;
 			}
 			continue;
 		}
 		
 		float lastPacket = g_Engine.time - last_player_use[i];
 		
-		bool isLagging = lastPacket > 0.5f || lag_state[i] == -1;
+		bool isLagging = lastPacket > 0.5f || lag_state[i] == LAG_JOINING;
 		
 		if (lastPacket > disconnect_message_time) {
-			if (lag_state[i] == 0) {
-				lag_state[i] = 1;
+			if (lag_state[i] == LAG_NONE) {
+				lag_state[i] = LAG_SEVERE_MSG;
 				g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " lost connection to the server.\n");
 			}
 		} else {
@@ -77,29 +89,41 @@ void check_for_crashed_players() {
 			if (loading_sprites[i].IsValid()) {
 				CBaseEntity@ loadSprite = loading_sprites[i];
 				loadSprite.pev.origin = spritePos;
-				loadSprite.pev.frame = (loadSprite.pev.frame + 1) % 12;
 			} else {
 				dictionary keys;
 				keys["origin"] = spritePos.ToString();
 				keys["model"] = loading_spr;
 				keys["rendermode"] = "2";
 				keys["renderamt"] = "255";
-				keys["framerate"] = "0";
+				keys["framerate"] = "" + loading_spr_framerate;
 				keys["scale"] = "0.15";
 				keys["spawnflags"] = "1";
 				CBaseEntity@ loadSprite = g_EntityFuncs.CreateEntity("env_sprite", keys, true);
 				loading_sprites[i] = EHandle(loadSprite);
 				
-				// save old render info
-				RenderInfo info;
-				info.rendermode = plr.pev.rendermode;
-				info.renderamt = plr.pev.renderamt;
-				info.renderfx = plr.pev.renderfx;
-				render_info[i] = info;
+				if (!loading_sprites[i].IsValid()) {
+					println("OMGGGGG WHYYYYYYYYYY AAAAAAAAAAAAAAAAAAAAAAA");
+				}
 				
-				plr.pev.rendermode = 2;
-				plr.pev.renderamt = 144; // min amt that doesn't dip below 128 when fading (which causes rendering errors on some models)
-				plr.pev.renderfx = 2;
+				if (!rendermode_applied[i]) {
+					// save old render info
+					RenderInfo info;
+					info.rendermode = plr.pev.rendermode;
+					info.renderamt = plr.pev.renderamt;
+					info.renderfx = plr.pev.renderfx;
+					render_info[i] = info;
+					
+					// TODO: Called twice before reverting rendermode somehow
+					
+					plr.pev.rendermode = 2;
+					plr.pev.renderamt = 144; // min amt that doesn't dip below 128 when fading (which causes rendering errors on some models)
+					plr.pev.renderfx = 2;
+					
+					println("Applying ghost rendermode to " + plr.pev.netname);
+					
+					rendermode_applied[i] = true;
+				}
+				
 			}
 		} else {
 			if (loading_sprites[i].IsValid()) {
@@ -107,6 +131,8 @@ void check_for_crashed_players() {
 				plr.pev.rendermode = render_info[i].rendermode;
 				plr.pev.renderamt = render_info[i].renderamt;
 				plr.pev.renderfx = render_info[i].renderfx;
+				rendermode_applied[i] = false;
+				println("Restored normal rendermode to " + plr.pev.netname);
 			}
 		}
 	}
@@ -135,12 +161,12 @@ void detect_when_loaded(EHandle h_plr, float startTime, int consecutivePings) {
 			int loadTime = int((g_Engine.time - startTime) + 0.5f);		
 			string plural = loadTime != 1 ? "s" : "";
 			g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " has finished loading.\n");
-			lag_state[plr.entindex()] = 0;
+			lag_state[plr.entindex()] = LAG_NONE;
 			return;
 		}
 	}
 	
-	println("new joiner loading in: " + plr.pev.netname + " (ping " + iping + ", loss " + packetLoss + ")");
+	//println("new joiner loading in: " + plr.pev.netname + " (ping " + iping + ", loss " + packetLoss + ")");
 	
 	g_Scheduler.SetTimeout("detect_when_loaded", 0.1f, h_plr, startTime, consecutivePings);
 }
@@ -153,22 +179,20 @@ HookReturnCode ClientJoin(CBasePlayer@ plr)
 		detect_when_loaded(EHandle(plr), g_Engine.time, 0);
 	}
 	
-	last_player_use[plr.entindex()] = 10;
-	lag_state[plr.entindex()] = -1;
+	last_player_use[plr.entindex()] = -10;
+	lag_state[plr.entindex()] = LAG_JOINING;
 	
 	return HOOK_CONTINUE;
 }
 
 HookReturnCode ClientLeave(CBasePlayer@ plr)
 {
-	println("PLAYER LEFT AAAAAAA " + plr.pev.netname);
 	return HOOK_CONTINUE;
 }
 
 HookReturnCode PlayerPostThink(CBasePlayer@ plr) {
-
-	if (lag_state[plr.entindex()] == 1) {
-		lag_state[plr.entindex()] = 0;
+	if (lag_state[plr.entindex()] == LAG_SEVERE_MSG) {
+		lag_state[plr.entindex()] = LAG_NONE;
 		int dur = int(g_Engine.time - last_player_use[plr.entindex()] + 0.5f);
 		string a_or_an = (dur == 8 || dur == 11) ? "an " : "a ";
 		g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " recovered from " + a_or_an + dur + " second lag spike.\n");
