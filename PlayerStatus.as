@@ -11,22 +11,37 @@ class PlayerState {
 	float last_use = 0; // last time playerUse function was called for player (no calls = packet loss or not connected)
 	int lag_spike_duration = 0; // time since last player packet when state is LAG_SEVERE_MSG
 	EHandle loading_sprite; // status shown above head
+	EHandle afk_sprite;
 	int lag_state = LAG_NONE;  // 1 = message sent that the player crashed, -1 = joining the game
 	RenderInfo render_info; // for undoing the disconnected render model
 	bool rendermode_applied = false; // prevent applying rendermode twice (breaking the undo method)
 	float last_use_flow_start = 0; // last time a consistent flow of PlayerThink calls was started
 	float connection_time = 0; // time the player first connected on this map (resets if client aborts connection)
+	float last_not_afk = g_Engine.time; // last time player pressed any buttons or sent a chat message
+	int last_button_state = 0;
+	bool afk_message_sent = false; // true after min_afk_message_time
+	int afk_count = 0; // number of times afk'd this map
 }
 
 array<PlayerState> g_player_states;
 
-float disconnect_message_time = 4.0f; // player considered disconnected after this many seconds
+float disconnect_message_time = 3.0f; // player considered disconnected after this many seconds
 float min_lag_detect = 0.3f; // minimum amount of a time a player needs to be disconnected before the icon shows
 
 // when joining, you sometimes are loaded in for like a second, then the game freezes again
 // this is how long to wait (seconds) until the player is consistently not lagging to consider
 // the player fully loaded into the map
 float min_flow_time = 1.5f;
+
+// time in seconds for different levels of afk
+array<int> afk_tier = {
+	15,    // cyan (min time)
+	60,    // green (message sent)	
+	60*5,  // yellow
+	60*10, // orange
+	60*30, // red
+	60*60, // purple
+};
 
 class RenderInfo {
 	int rendermode;
@@ -37,6 +52,7 @@ class RenderInfo {
 string loading_spr = "sprites/windows/hourglass.spr";
 string warn_spr = "sprites/windows/xpwarn.spr";
 string dial_spr = "sprites/windows/dial.spr";
+string afk_spr = "sprites/zzz.spr";
 
 string error_snd = "winxp/critical_stop.wav";
 string startup_snd = "winxp/startup.wav";
@@ -56,16 +72,18 @@ void PluginInit()  {
 	g_Hooks.RegisterHook( Hooks::Player::ClientPutInServer, @ClientJoin );
 	g_Hooks.RegisterHook( Hooks::Player::ClientDisconnect, @ClientLeave );
 	g_Hooks.RegisterHook( Hooks::Player::PlayerPostThink, @PlayerPostThink );
+	g_Hooks.RegisterHook( Hooks::Player::ClientSay, @ClientSay );
 	
 	g_player_states.resize(33);
 	
-	g_Scheduler.SetInterval("check_for_crashed_players", 0.1f, -1);
+	g_Scheduler.SetInterval("update_player_status", 0.1f, -1);
 }
 
 void MapInit() {
 	g_Game.PrecacheModel(loading_spr);
 	g_Game.PrecacheModel(warn_spr);
 	g_Game.PrecacheModel(dial_spr);
+	g_Game.PrecacheModel(afk_spr);
 	
 	g_SoundSystem.PrecacheSound(error_snd);
 	g_Game.PrecacheGeneric("sound/" + error_snd);
@@ -102,13 +120,14 @@ string getUniqueId(CBasePlayer@ plr) {
 	return steamid;
 }
 
-void check_for_crashed_players() {
+void update_player_status() {
 	for ( int i = 1; i <= g_Engine.maxClients; i++ )
 	{
 		CBasePlayer@ plr = g_PlayerFuncs.FindPlayerByIndex(i);
 		
 		if (plr is null or !plr.IsConnected()) {
 			g_EntityFuncs.Remove(g_player_states[i].loading_sprite);
+			g_EntityFuncs.Remove(g_player_states[i].afk_sprite);
 			if (g_player_states[i].lag_state != LAG_NONE) {
 				g_player_states[i].lag_state = LAG_NONE;
 			}
@@ -142,9 +161,12 @@ void check_for_crashed_players() {
 			}
 		}
 		
-		if (isLagging) {
-			Vector spritePos = plr.pev.origin + Vector(0,0,44);
+		Vector spritePos = plr.pev.origin + Vector(0,0,44);
 		
+		if (isLagging)
+		{
+			g_EntityFuncs.Remove(g_player_states[i].afk_sprite);
+			
 			if (g_player_states[i].loading_sprite.IsValid()) {
 				CBaseEntity@ loadSprite = g_player_states[i].loading_sprite;
 				loadSprite.pev.origin = spritePos;
@@ -159,10 +181,6 @@ void check_for_crashed_players() {
 				keys["spawnflags"] = "1";
 				CBaseEntity@ loadSprite = g_EntityFuncs.CreateEntity("env_sprite", keys, true);
 				g_player_states[i].loading_sprite = EHandle(loadSprite);
-				
-				if (!g_player_states[i].loading_sprite.IsValid()) {
-					println("OMGGGGG WHYYYYYYYYYY AAAAAAAAAAAAAAAAAAAAAAA");
-				}
 				
 				// TODO: Called twice before reverting rendermode somehow
 				
@@ -186,7 +204,8 @@ void check_for_crashed_players() {
 						play_sound(plr, exclaim_snd, 0.3f);
 				}
 			}
-		} else {
+		}
+		else { // not lagging
 			if (g_player_states[i].lag_state == LAG_SEVERE_MSG) {
 				g_player_states[i].lag_state = LAG_NONE;
 				int dur = g_player_states[i].lag_spike_duration;
@@ -208,6 +227,72 @@ void check_for_crashed_players() {
 			}
 			
 			g_player_states[i].lag_spike_duration = -1;
+			
+			bool isGhost = plr.GetObserver() !is null && plr.GetObserver().IsObserver();
+			
+			float afkTime = g_Engine.time - g_player_states[i].last_not_afk;
+			if (!isGhost && afkTime > afk_tier[0]) {
+				if (!g_player_states[i].afk_sprite.IsValid()) {
+					dictionary keys;
+					keys["origin"] = spritePos.ToString();
+					keys["model"] = afk_spr;
+					keys["rendermode"] = "2";
+					keys["renderamt"] = "255";
+					keys["rendercolor"] = "255 255 255";
+					keys["framerate"] = "10";
+					keys["scale"] = ".15";
+					keys["spawnflags"] = "1";
+					CBaseEntity@ spr = g_EntityFuncs.CreateEntity("env_sprite", keys, true);
+					g_player_states[i].afk_sprite = EHandle(spr);
+				}
+			
+				CBaseEntity@ afkSprite = g_player_states[i].afk_sprite;
+				afkSprite.pev.origin = spritePos;
+				
+				Vector color = Vector(0, 255, 255);
+				if (afkTime > afk_tier[5]) {
+					color = Vector(128, 0, 255);
+				} else if (afkTime > afk_tier[4]) {
+					color = Vector(255, 0, 0);
+				} else if (afkTime > afk_tier[3]) {
+					color = Vector(255, 128, 0);
+				} else if (afkTime > afk_tier[2]) {
+					color = Vector(255, 255, 0);
+				} else if (afkTime > afk_tier[1]) {
+					color = Vector(0, 255, 0);
+				} else {
+					color = Vector(0, 255, 255);
+				}
+				
+				afkSprite.pev.rendercolor = color;
+			} else {
+				g_EntityFuncs.Remove(g_player_states[i].afk_sprite);
+			}
+			
+			if (!isGhost && afkTime > afk_tier[1] && !g_player_states[i].afk_message_sent) {
+				g_player_states[i].afk_message_sent = true;
+				g_player_states[i].afk_count++;
+				
+				if (g_player_states[i].afk_count > 2) {
+					int c = g_player_states[i].afk_count;
+					string suffix = "th";
+					if (c % 10 == 3 && c != 13) {
+						suffix = "rd";
+					}
+					if (c % 10 == 2 && c != 12) {
+						suffix = "nd";
+					}
+					if (c % 10 == 1 && c != 11) {
+						suffix = "st";
+					}
+					g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " is AFK for the " + g_player_states[i].afk_count + suffix + " time\n");
+				}
+				else if (g_player_states[i].afk_count > 1) {
+					g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " is AFK again\n");
+				} else {
+					g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " is AFK\n");
+				}
+			}
 		}
 	}
 }
@@ -243,6 +328,7 @@ void detect_when_loaded(EHandle h_plr) {
 		string plural = loadTime != 1 ? "s" : "";
 		g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " has finished loading (" + loadTime +" seconds).\n");
 		g_player_states[idx].lag_state = LAG_NONE;
+		g_player_states[idx].last_not_afk = g_Engine.time;
 		return;
 	}
 	
@@ -328,6 +414,27 @@ HookReturnCode ClientLeave(CBasePlayer@ plr)
 	return HOOK_CONTINUE;
 }
 
+string formatTime(float t) {
+	int rounded = int(t + 0.5f);
+	
+	int hours = rounded / (60*60);
+	
+	rounded -= hours * 60*60;
+	
+	int minutes = rounded / 60;
+	int seconds = rounded % 60;
+
+	
+	if (hours > 0) {
+		return "" + hours + " hours and " + minutes + " minutes";
+	}
+	else if (minutes > 0) {
+		return "" + minutes + " minutes" + " and " + seconds + " seconds";
+	} else {
+		return "" + seconds + " seconds";
+	}
+}
+
 HookReturnCode PlayerPostThink(CBasePlayer@ plr)
 {
 	int idx = plr.entindex();
@@ -339,10 +446,57 @@ HookReturnCode PlayerPostThink(CBasePlayer@ plr)
 		
 	if (g_Engine.time - g_player_states[idx].last_use > min_lag_detect) {
 		g_player_states[idx].last_use_flow_start = g_Engine.time;
-		println("FLOW INTERUUPTED");
 	}
 		
 	g_player_states[idx].last_use = g_Engine.time;
+	
+	int buttons = plr.m_afButtonPressed | plr.m_afButtonReleased;
+	
+	if (buttons != g_player_states[idx].last_button_state) {
+		float afkTime = g_Engine.time - g_player_states[idx].last_not_afk;
+		
+		bool isGhost = plr.GetObserver() !is null && plr.GetObserver().IsObserver();
+		
+		if ((!isGhost && afkTime > afk_tier[1]) || afkTime > afk_tier[2]) {
+			g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " was AFK for " + formatTime(afkTime) + ".\n");
+		}
+	
+		g_player_states[idx].last_not_afk = g_Engine.time;		
+		g_player_states[idx].afk_message_sent = false;
+	}
+	
+	g_player_states[idx].last_button_state = buttons;
+	
+	return HOOK_CONTINUE;
+}
+
+bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand=false) {
+	bool isAdmin = g_PlayerFuncs.AdminLevel(plr) >= ADMIN_YES;
+	
+	if ( args.ArgC() > 0 )
+	{				
+		/*
+		if (args[0] == "d") {
+			g_PlayerFuncs.RespawnAllPlayers(true, true);
+			return true;
+		}
+		*/
+	}
+	
+	return false;
+}
+
+HookReturnCode ClientSay( SayParameters@ pParams ) {
+	CBasePlayer@ plr = pParams.GetPlayer();
+	const CCommand@ args = pParams.GetArguments();	
+	
+	g_player_states[plr.entindex()].last_not_afk = g_Engine.time;
+	
+	if (doCommand(plr, args, false))
+	{
+		pParams.ShouldHide = true;
+		return HOOK_HANDLED;
+	}
 	
 	return HOOK_CONTINUE;
 }
