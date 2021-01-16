@@ -1,11 +1,7 @@
 // TODO:
-// - connecting joining player ios null
-// - respawn from portal triggers not afk?
-//   - "is afk again" followed immediately by "was afk for 1:37 minutes"
+// - connecting joining player is null
 // - flashlight + vc should disable afk
 // - recovered from a 0 second lag spike
-// - "afk again" but never said for how long first time
-// - being slayed resets afk timer
 // - still not enough time for loading somehow
 
 void print(string text) { g_Game.AlertMessage( at_console, text); }
@@ -500,7 +496,7 @@ HookReturnCode PlayerPostThink(CBasePlayer@ plr)
 		
 	g_player_states[idx].last_use = g_Engine.time;
 	
-	int buttons = plr.m_afButtonPressed | plr.m_afButtonReleased;
+	int buttons = plr.m_afButtonPressed & ~32768; // for some reason the scoreboard button is pressed on death/respawn	
 	
 	if (buttons != g_player_states[idx].last_button_state) {
 		return_from_afk_message(plr);
@@ -532,19 +528,19 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand=fal
 				PlayerState state = g_player_states[i];
 				
 				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "\nSLOT " + i + ": " + p.pev.netname + "\n");
-				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    last_use            = " + state.last_use + " (" + (g_Engine.time - state.last_use) + ")\n");
-				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    last_use_flow_start = " + state.last_use_flow_start + " (" + (g_Engine.time - state.last_use_flow_start) + ")\n");
-				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    rendermode_applied  = " + state.rendermode_applied + "\n");
-				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    render_info         = " + state.render_info.rendermode + " " + state.render_info.renderfx + " " + state.render_info.renderamt + "\n");
-				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    lag_state           = " + state.lag_state + "\n");
-				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    loading_sprite      = " + (state.loading_sprite.IsValid() ? "true" : "false") + "\n");
+				//g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    last_use            = " + state.last_use + " (" + (g_Engine.time - state.last_use) + ")\n");
+				//g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    last_use_flow_start = " + state.last_use_flow_start + " (" + (g_Engine.time - state.last_use_flow_start) + ")\n");
+				//g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    rendermode_applied  = " + state.rendermode_applied + "\n");
+				//g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    render_info         = " + state.render_info.rendermode + " " + state.render_info.renderfx + " " + state.render_info.renderamt + "\n");
+				//g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    lag_state           = " + state.lag_state + "\n");
+				//g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    loading_sprite      = " + (state.loading_sprite.IsValid() ? "true" : "false") + "\n");
 				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    afk_sprite          = " + (state.afk_sprite.IsValid() ? "true" : "false") + "\n");
 				//g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    lag_spike_duration  = " + state.lag_spike_duration + "\n");
 				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    connection_time     = " + state.connection_time + "\n");
-				//g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    last_not_afk        = " + state.last_not_afk + "\n");
-				//g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    last_button_state   = " + state.last_button_state + "\n");
-				//g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    afk_message_sent    = " + state.afk_message_sent) + "\n";
-				//g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    afk_count           = " + state.afk_count + "\n");
+				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    last_not_afk        = " + state.last_not_afk + "\n");
+				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    last_button_state   = " + state.last_button_state + "\n");
+				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    afk_message_sent    = " + state.afk_message_sent + "\n");
+				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    afk_count           = " + state.afk_count + "\n");
 			}
 			
 			return true;
