@@ -53,6 +53,9 @@ float min_lag_detect = 0.3f; // minimum amount of a time a player needs to be di
 float min_flow_time = 3.0f;
 
 
+float dial_loop_dur = 26.0; // duration of the dialup sound loop
+
+
 bool debug_mode = false;
 
 // time in seconds for different levels of afk
@@ -170,7 +173,7 @@ void update_player_status() {
 			if (state.lag_state == LAG_NONE) {
 				state.lag_state = LAG_SEVERE_MSG;
 				g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " lost connection to the server.\n");
-				play_sound(plr, dial_snd, 0.5f, true);
+				play_sound(plr, dial_snd, 0.5f, dial_loop_dur);
 
 				Vector spritePos = plr.pev.origin + Vector(0,0,44);
 			
@@ -323,10 +326,23 @@ void update_player_status() {
 	}
 }
 
-void play_sound(CBaseEntity@ target, string snd, float vol = 1.0f, bool loop=false) {
+void play_sound(CBasePlayer@ target, string snd, float vol = 1.0f, float loopDelay=0) {	
 	int pit = 100;
-	int flags = loop ? int(SND_FORCE_LOOP) : 0;
-	g_SoundSystem.PlaySound(target.edict(), CHAN_VOICE, snd, vol, 0.8f, flags, pit, 0, true, target.pev.origin);
+	g_SoundSystem.PlaySound(target.edict(), CHAN_VOICE, snd, vol, 0.8f, 0, pit, 0, true, target.pev.origin);
+	
+	if (loopDelay > 0) {
+		g_Scheduler.SetTimeout("loop_sound", loopDelay, EHandle(target), snd, vol, loopDelay);
+	}
+}
+
+// looped sounds sometimes get stuck looping forever, so manually check if the ent still exists
+void loop_sound(EHandle h_target, string snd, float vol, float loopDelay) {
+	CBasePlayer@ target = cast<CBasePlayer@>(h_target.GetEntity());
+	if (target is null or !target.IsConnected() or g_player_states[target.entindex()].lag_state != LAG_SEVERE_MSG) {
+		return;
+	}
+	
+	play_sound(target, snd, vol, loopDelay);
 }
 
 void detect_when_loaded(EHandle h_plr) {
@@ -404,7 +420,7 @@ HookReturnCode ClientConnect(edict_t@ eEdict, const string &in sNick, const stri
 {
 	CBasePlayer@ plr = getAnyPlayer();
 	
-	g_PlayerFuncs.ClientPrintAll(HUD_PRINTNOTIFY, "- " + sNick + " is connecting.\n");
+	g_PlayerFuncs.ClientPrintAll(HUD_PRINTNOTIFY, sNick + " is connecting.\n");
 	
 	if (plr !is null) {
 		//g_PlayerFuncs.SayTextAll(plr, "- " + sNick + " is connecting.\n");
@@ -425,7 +441,6 @@ HookReturnCode ClientJoin(CBasePlayer@ plr)
 	if (debug_mode && plr.pev.netname != "w00tguy") {
 		// nothing
 	} else {
-		println("DETECT WHEN LOADED");
 		detect_when_loaded(EHandle(plr));
 	}
 	
