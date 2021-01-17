@@ -27,6 +27,19 @@ class PlayerState {
 	int last_button_state = 0;
 	bool afk_message_sent = false; // true after min_afk_message_time
 	int afk_count = 0; // number of times afk'd this map
+	float total_afk = 0; // total time afk (minus the current afk session)
+	
+	float get_total_afk_time() {
+		float total = total_afk;
+		
+		// don't count current current afk session unless icon is showing
+		float afkTime = g_Engine.time - last_not_afk;
+		if (afkTime > afk_tier[0]) {
+			total += afkTime;
+		}
+		
+		return total;
+	}
 }
 
 array<PlayerState> g_player_states;
@@ -439,25 +452,20 @@ HookReturnCode ClientLeave(CBasePlayer@ plr)
 	return HOOK_CONTINUE;
 }
 
-string formatTime(float t) {
+string formatTime(float t, bool statsPage=false) {
 	int rounded = int(t + 0.5f);
-	
-	int hours = rounded / (60*60);
-	
-	rounded -= hours * 60*60;
 	
 	int minutes = rounded / 60;
 	int seconds = rounded % 60;
-
 	
-	if (hours > 0) {
-		string sm = "" + minutes;
-		if (minutes < 10) {
-			sm = "0" + sm;
+	if (statsPage) {
+		string ss = "" + seconds;
+		if (seconds < 10) {
+			ss = "0" + ss;
 		}
-		return "" + hours + ":" + sm + " HOURS";
+		return "" + minutes + ":" + ss + "";
 	}
-	else if (minutes > 0) {
+	if (minutes > 0) {
 		string ss = "" + seconds;
 		if (seconds < 10) {
 			ss = "0" + ss;
@@ -473,6 +481,9 @@ void return_from_afk_message(CBasePlayer@ plr) {
 	float afkTime = g_Engine.time - g_player_states[idx].last_not_afk;
 		
 	bool ok_to_afk = g_SurvivalMode.IsActive() && !plr.IsAlive();
+	
+	if (afkTime > afk_tier[1])
+		g_player_states[idx].total_afk += afkTime;
 	
 	if (!debug_mode) {
 		if ((!ok_to_afk && afkTime > afk_tier[1]) || afkTime > afk_tier[2]) {
@@ -508,6 +519,12 @@ HookReturnCode PlayerPostThink(CBasePlayer@ plr)
 	g_player_states[idx].last_button_state = buttons;
 	
 	return HOOK_CONTINUE;
+}
+
+class AfkStat {
+	string name;
+	float time;
+	PlayerState@ state;
 }
 
 bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand=false) {
@@ -568,6 +585,102 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand=fal
 			
 			return true;
 		}
+		
+		if (args[0] == "afk?") {
+			int totalAfk = 0;
+			int totalPlayers = 0;
+			
+			array<string> afkers;
+			
+			for ( int i = 1; i <= g_Engine.maxClients; i++ )
+			{
+				CBasePlayer@ p = g_PlayerFuncs.FindPlayerByIndex(i);
+				
+				if (p is null or !p.IsConnected()) {
+					continue;
+				}
+				
+				PlayerState@ state = g_player_states[i];
+				
+				float afkTime = g_Engine.time - state.last_not_afk;
+				if (afkTime > afk_tier[0]) {
+					totalAfk++;
+					afkers.insertLast(p.pev.netname);
+				}
+				totalPlayers++;
+			}
+			
+			int percent = int((float(totalAfk) / float(totalPlayers))*100);
+			
+			if (totalAfk == 0) {
+				g_PlayerFuncs.SayTextAll(plr, "No one is AFK.\n");
+			}
+			else if (totalAfk == 1) {
+				g_PlayerFuncs.SayTextAll(plr, afkers[0] + " is AFK.\n");
+			}
+			else if (totalAfk == 2) {
+				string afkString = afkers[0] + " and " + afkers[1];
+				g_PlayerFuncs.SayTextAll(plr, afkString + " are AFK.\n");
+			}
+			else if (totalAfk == 3) {
+				string afkString = afkers[0] + ", " + afkers[1] + ", and " + afkers[2];
+				g_PlayerFuncs.SayTextAll(plr, afkString + " are AFK (" + percent + "% of the server).\n");
+			}
+			else {
+				g_PlayerFuncs.SayTextAll(plr, "" + totalAfk + " players are AFK (" + percent + "% of the server).\n");
+			}
+			
+			return false;
+		}
+		
+		if (args[0] == ".listafk") {
+			int totalAfk = 0;
+			int totalPlayers = 0;
+			
+			array<AfkStat> afkStats;
+			
+			for ( int i = 1; i <= g_Engine.maxClients; i++ )
+			{
+				CBasePlayer@ p = g_PlayerFuncs.FindPlayerByIndex(i);
+				
+				if (p is null or !p.IsConnected()) {
+					continue;
+				}
+				
+				PlayerState@ state = g_player_states[i];
+				
+				AfkStat stat;
+				stat.name = p.pev.netname;
+				stat.time = state.get_total_afk_time();
+				@stat.state = @state;
+				
+				afkStats.insertLast(stat);
+			}
+			
+			afkStats.sort(function(a,b) { return a.time > b.time; });
+			
+			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, '\nAFK times for this map (MINUTES:SECONDS)\n');
+			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, '\n   Player Name              Total    AFK Now?\n');
+			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, '------------------------------------------------\n');
+			
+			for (uint i = 0; i < afkStats.size(); i++) {
+				string pname = afkStats[i].name;
+				
+				while (pname.Length() < 24) {
+					pname += " ";
+				}
+				if (pname.Length() > 24) {
+					pname = pname.SubString(0, 21) + "...";
+				}
+				
+				string total = formatTime(afkStats[i].time, true) + "     ";
+				string afkNow = (g_Engine.time - afkStats[i].state.last_not_afk) > afk_tier[0] ? "  Yes" : "  No";
+				
+				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "" + (i+1) + ") " + pname + " " + total + afkNow + '\n');
+			}
+			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, '------------------------------------------------\n\n');
+			return false;
+		}
 	}
 	
 	return false;
@@ -587,4 +700,11 @@ HookReturnCode ClientSay( SayParameters@ pParams ) {
 	}
 	
 	return HOOK_CONTINUE;
+}
+
+CClientCommand _listafk("listafk", "AFK player commands", @consoleCmd );
+
+void consoleCmd( const CCommand@ args ) {
+	CBasePlayer@ plr = g_ConCommandSystem.GetCurrentPlayer();
+	doCommand(plr, args, true);
 }
