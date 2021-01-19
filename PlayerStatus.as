@@ -47,10 +47,10 @@ array<PlayerState> g_player_states;
 float disconnect_message_time = 2.0f; // player considered disconnected after this many seconds
 float min_lag_detect = 0.3f; // minimum amount of a time a player needs to be disconnected before the icon shows
 
-// when joining, you sometimes are loaded in for like a second, and then the game freezes again.
 // this is how long to wait (seconds) until the player is consistently not lagging to consider
-// the player fully loaded into the map
-float min_flow_time = 3.0f;
+// the player fully loaded into the map, after they've entered the final loading phase (when sounds precache)
+// sometimes it takes a while for the final loading phase to start, depending on the map and player ping and specs
+float min_flow_time = 1.0f;
 
 
 float dial_loop_dur = 26.0; // duration of the dialup sound loop
@@ -133,6 +133,44 @@ void MapInit() {
 	
 	g_player_states.resize(0);
 	g_player_states.resize(33);
+}
+
+void MapActivate() {
+	modify_spawn_points_for_loading_detection();
+}
+
+// Normally, this happens when a player joins the game, and it's easy to detect when a player is loaded:
+//   1) Player connects and spawns, but PlayerPostThink calls have not started yet.
+//   2) PlayerPostThink calls start a few seconds later and their loading screen disappears.
+//
+// Weird stuff happens when laggy players load into a map with lots of custom content (e.g. io_v1 + 250ms ping):
+//   1) Player connects and spawns
+//   2) PlayerPostThink calls run normally for a few seconds, but the joining player still sees a loading screen.
+//   3) Player starts precaching sounds or smth, and the PlayerPostThink calls stop.
+//   4) Player fully loads in up to 60 seconds later, and the PlayerPostThink calls continue.
+//
+// At step 3, the player's "angles" variable is updated to match the spawn point, but only if the spawn point
+// angles != (0,0,0). This works in survival mode too. By waiting for the angles to update, the plugin can then 
+// wait for the PlayerPostThink calls to resume before saying "- Player has loaded". This prevents false positives
+// at step 2, which may last several seconds, or less, or more. It depends on the map and the player's specs.
+//
+// So, in order to have reliable "is fully loaded" messages, all spawn points need to use non-default angles keys
+void modify_spawn_points_for_loading_detection() {
+	int updateCount = 0;
+	CBaseEntity@ ent = null;
+	do {
+		@ent = g_EntityFuncs.FindEntityByClassname(ent, "info_player_*");
+		if (ent !is null) {
+			if (ent.pev.angles.x == 0 && ent.pev.angles.y == 0 && ent.pev.angles.z == 0) {
+				ent.pev.angles.y = 0.01f;
+				updateCount++;
+			}
+		}
+	} while (ent !is null);
+	
+	if (updateCount > 0) {
+		println("PlayerStatus: updated " + updateCount + " spawn points to help with player load detection");
+	}
 }
 
 string getUniqueId(CBasePlayer@ plr) {
@@ -345,7 +383,7 @@ void loop_sound(EHandle h_target, string snd, float vol, float loopDelay) {
 	play_sound(target, snd, vol, loopDelay);
 }
 
-void detect_when_loaded(EHandle h_plr) {
+void detect_when_loaded(EHandle h_plr, Vector lastAngles, int angleKeyUpdates) {
 	if (!h_plr.IsValid()) {
 		println("ABORT DETECT HANDLE NOT VALID");
 		return;
@@ -359,14 +397,35 @@ void detect_when_loaded(EHandle h_plr) {
 	}
 	
 	int idx = plr.entindex();
+	
+	// angles changing is the only thing visible to AS for detecting which stage of the loading process the player is in.
+	// first angle change = spawn point angles
+	// second angle change = reset back to 0,0,0 
+	// third angle change = back to spawn angles, but only approximately. Sound precaching starts after this (lag spike)
+	const int angleChangesForFinalLoadingPhase = 3;
+	
+	if (plr.pev.angles.x != lastAngles.x || plr.pev.angles.y != lastAngles.y || plr.pev.angles.z != lastAngles.z) {
+		//println("ANGLES KEY UPDATEDDD " + plr.pev.angles.ToString());
+		lastAngles = plr.pev.angles;
+		angleKeyUpdates++;
+		
+		if (angleKeyUpdates == angleChangesForFinalLoadingPhase) {
+			// reset the flow time to prevent message for loading in being sent too early.
+			// Up until now, there's been a steady flow of PlayerPostThink calls. 
+			// That is about to stop as the player starts precaching sounds.
+			g_player_states[idx].last_use_flow_start = g_Engine.time;
+			//println("BEGIN FINAL LOADING PHASE for " + plr.pev.netname);
+		}
+	}
+	
+	
 	float last_use_delta = g_Engine.time - g_player_states[idx].last_use;
 	float flow_time = g_Engine.time - g_player_states[idx].last_use_flow_start;
-	bool isAlreadyPlaying = false && plr.pev.button != 0; // TODO: true before player even spawns??
+	bool isAlreadyPlaying = (plr.m_afButtonPressed | plr.m_afButtonReleased | plr.m_afButtonLast) != 0; // invalid until the final loading phase
 	bool noMoreLagSpikes = last_use_delta < min_lag_detect && flow_time > min_flow_time;
 
 	//println("Finished? " + last_use_delta + " " + flow_time + " " + isAlreadyPlaying + " " + noMoreLagSpikes);
-
-	if (noMoreLagSpikes || isAlreadyPlaying) {
+	if (angleKeyUpdates >= angleChangesForFinalLoadingPhase && (noMoreLagSpikes || isAlreadyPlaying)) {
 		int loadTime = int((g_Engine.time - g_player_states[idx].connection_time) + 0.5f - flow_time);		
 		string plural = loadTime != 1 ? "s" : "";
 		//g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " has finished loading (" + loadTime +" seconds).\n");
@@ -378,7 +437,7 @@ void detect_when_loaded(EHandle h_plr) {
 		return;
 	}
 	
-	g_Scheduler.SetTimeout("detect_when_loaded", 0.1f, h_plr);
+	g_Scheduler.SetTimeout("detect_when_loaded", 0.1f, h_plr, lastAngles, angleKeyUpdates);
 }
 
 
@@ -441,7 +500,7 @@ HookReturnCode ClientJoin(CBasePlayer@ plr)
 	if (debug_mode && plr.pev.netname != "w00tguy") {
 		// nothing
 	} else {
-		detect_when_loaded(EHandle(plr));
+		detect_when_loaded(EHandle(plr), Vector(0,0,0), 0);
 	}
 	
 	int idx = plr.entindex();
