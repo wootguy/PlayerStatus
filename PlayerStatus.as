@@ -2,7 +2,7 @@
 // - connecting joining player is null
 // - flashlight + vc should disable afk
 // - recovered from a 0 second lag spike
-// - still not enough time for loading somehow
+// - still not enough time for loading somehow (redmarket)
 
 void print(string text) { g_Game.AlertMessage( at_console, text); }
 void println(string text) { print(text + "\n"); }
@@ -44,13 +44,13 @@ class PlayerState {
 
 array<PlayerState> g_player_states;
 
-float disconnect_message_time = 2.0f; // player considered disconnected after this many seconds
+float disconnect_message_time = 4.0f; // player considered disconnected after this many seconds
 float min_lag_detect = 0.3f; // minimum amount of a time a player needs to be disconnected before the icon shows
 
 // this is how long to wait (seconds) until the player is consistently not lagging to consider
 // the player fully loaded into the map, after they've entered the final loading phase (when sounds precache)
 // sometimes it takes a while for the final loading phase to start, depending on the map and player ping and specs
-float min_flow_time = 1.0f;
+float min_flow_time = 3.0f;
 
 
 float dial_loop_dur = 26.0; // duration of the dialup sound loop
@@ -747,10 +747,15 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand=fal
 					pname = pname.SubString(0, 21) + "...";
 				}
 				
+				string idx = "" + (i+1);
+				if (i+1 < 10) {
+					idx = " " + idx;
+				}
+				
 				string total = formatTime(afkStats[i].time, true) + "     ";
 				string afkNow = (g_Engine.time - afkStats[i].state.last_not_afk) > afk_tier[0] ? "  Yes" : "  No";
 				
-				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "" + (i+1) + ") " + pname + " " + total + afkNow + '\n');
+				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "" + idx + ") " + pname + " " + total + afkNow + '\n');
 			}
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, '------------------------------------------------\n\n');
 			return false;
