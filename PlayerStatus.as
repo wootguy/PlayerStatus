@@ -210,7 +210,7 @@ void update_player_status() {
 		if (lastPacket > disconnect_message_time) {
 			if (state.lag_state == LAG_NONE) {
 				state.lag_state = LAG_SEVERE_MSG;
-				g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " lost connection to the server.\n");
+				g_PlayerFuncs.ClientPrintAll(HUD_PRINTNOTIFY, "" + plr.pev.netname + " lost connection to the server.\n");
 				play_sound(plr, dial_snd, 0.5f, dial_loop_dur);
 
 				Vector spritePos = plr.pev.origin + Vector(0,0,44);
@@ -279,7 +279,7 @@ void update_player_status() {
 				state.lag_state = LAG_NONE;
 				int dur = state.lag_spike_duration;
 				string a_or_an = (dur == 8 || dur == 11) ? "an " : "a ";
-				g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " recovered from " + a_or_an + dur + " second lag spike.\n");
+				g_PlayerFuncs.ClientPrintAll(HUD_PRINTNOTIFY, "" + plr.pev.netname + " recovered from " + a_or_an + dur + " second lag spike.\n");
 			}
 			
 			if (state.rendermode_applied) {
@@ -352,12 +352,13 @@ void update_player_status() {
 					if (c % 10 == 1 && c != 11) {
 						suffix = "st";
 					}
-					g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " is AFK for the " + state.afk_count + suffix + " time.\n");
+					g_PlayerFuncs.ClientPrintAll(HUD_PRINTNOTIFY, "" + plr.pev.netname + " is AFK for the " + state.afk_count + suffix + " time.\n");
 				}
 				else if (state.afk_count > 1) {
-					g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " is AFK again.\n");
+					
+					g_PlayerFuncs.ClientPrintAll(HUD_PRINTNOTIFY, "" + plr.pev.netname + " is AFK again.\n");
 				} else {
-					g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " is AFK.\n");
+					g_PlayerFuncs.ClientPrintAll(HUD_PRINTNOTIFY, "" + plr.pev.netname + " is AFK.\n");
 				}
 			}
 		}
@@ -561,7 +562,7 @@ void return_from_afk_message(CBasePlayer@ plr) {
 	
 	if (!debug_mode) {
 		if ((!ok_to_afk && afkTime > afk_tier[1]) || afkTime > afk_tier[2]) {
-			g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " was AFK for " + formatTime(afkTime) + ".\n");
+			g_PlayerFuncs.ClientPrintAll(HUD_PRINTNOTIFY, "" + plr.pev.netname + " was AFK for " + formatTime(afkTime) + ".\n");
 		}
 	}
 }
@@ -664,6 +665,8 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand=fal
 			int totalAfk = 0;
 			int totalPlayers = 0;
 			
+			g_PlayerFuncs.SayTextAll(plr, "" + plr.pev.netname + ": afk?\n");
+			
 			array<string> afkers;
 			
 			for ( int i = 1; i <= g_Engine.maxClients; i++ )
@@ -687,7 +690,7 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand=fal
 			int percent = int((float(totalAfk) / float(totalPlayers))*100);
 			
 			if (totalAfk == 0) {
-				g_PlayerFuncs.SayTextAll(plr, "No one is AFK.\n");
+				g_PlayerFuncs.SayTextAll(plr, "Nobody is AFK.\n");
 			}
 			else if (totalAfk == 1) {
 				g_PlayerFuncs.SayTextAll(plr, afkers[0] + " is AFK.\n");
@@ -704,7 +707,7 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand=fal
 				g_PlayerFuncs.SayTextAll(plr, "" + totalAfk + " players are AFK (" + percent + "% of the server).\n");
 			}
 			
-			return false;
+			return true;
 		}
 		
 		if (args[0] == ".listafk") {
