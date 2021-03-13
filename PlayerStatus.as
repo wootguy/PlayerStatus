@@ -602,7 +602,9 @@ class AfkStat {
 	PlayerState@ state;
 }
 
-bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand=false) {
+
+// 0 = not handled, 1 = handled but show chat, 2 = handled and hide chat
+int doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand=false) {
 	bool isAdmin = g_PlayerFuncs.AdminLevel(plr) >= ADMIN_YES;
 	
 	if ( args.ArgC() > 0 )
@@ -635,7 +637,7 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand=fal
 				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "    afk_count           = " + state.afk_count + "\n");
 			}
 			
-			return true;
+			return 2;
 		}
 		
 		if (isAdmin && args[0] == ".dreset") {			
@@ -658,14 +660,12 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand=fal
 				//g_EntityFuncs.Remove(state.afk_sprite);
 			}
 			
-			return true;
+			return 2;
 		}
 		
 		if (args[0] == "afk?") {
 			int totalAfk = 0;
 			int totalPlayers = 0;
-			
-			g_PlayerFuncs.SayTextAll(plr, "" + plr.pev.netname + ": afk?\n");
 			
 			array<string> afkers;
 			
@@ -707,7 +707,7 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand=fal
 				g_PlayerFuncs.SayTextAll(plr, "" + totalAfk + " players are AFK (" + percent + "% of the server).\n");
 			}
 			
-			return true;
+			return 1;
 		}
 		
 		if (args[0] == ".listafk") {
@@ -761,11 +761,11 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand=fal
 				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "" + idx + ") " + pname + " " + total + afkNow + '\n');
 			}
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, '------------------------------------------------\n\n');
-			return false;
+			return 2;
 		}
 	}
 	
-	return false;
+	return 0;
 }
 
 HookReturnCode ClientSay( SayParameters@ pParams ) {
@@ -775,9 +775,12 @@ HookReturnCode ClientSay( SayParameters@ pParams ) {
 	return_from_afk_message(plr);
 	g_player_states[plr.entindex()].last_not_afk = g_Engine.time;
 	
-	if (doCommand(plr, args, false))
+	int chatHandled = doCommand(plr, args, false);
+	if (chatHandled > 0)
 	{
-		pParams.ShouldHide = true;
+		if (chatHandled == 2) {
+			pParams.ShouldHide = true;
+		}
 		return HOOK_HANDLED;
 	}
 	
