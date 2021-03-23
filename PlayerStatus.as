@@ -28,6 +28,7 @@ class PlayerState {
 	bool afk_message_sent = false; // true after min_afk_message_time
 	int afk_count = 0; // number of times afk'd this map
 	float total_afk = 0; // total time afk (minus the current afk session)
+	float fully_load_time = 0; // time the player last fully loaded into the server
 	
 	float get_total_afk_time() {
 		float total = total_afk;
@@ -50,8 +51,9 @@ float min_lag_detect = 0.3f; // minimum amount of a time a player needs to be di
 // this is how long to wait (seconds) until the player is consistently not lagging to consider
 // the player fully loaded into the map, after they've entered the final loading phase (when sounds precache)
 // sometimes it takes a while for the final loading phase to start, depending on the map and player ping and specs
-float min_flow_time = 3.0f;
+float min_flow_time = 6.0f;
 
+float suppress_lag_sounds_time = 10.0f; // time after joining to silence the lag sounds (can get spammy on map changes)
 
 float dial_loop_dur = 26.0; // duration of the dialup sound loop
 
@@ -62,10 +64,10 @@ bool debug_mode = false;
 array<int> afk_tier = {
 	30,    // cyan (min time)
 	60,    // green (message sent)	
-	60*5,  // yellow
-	60*10, // orange
-	60*30, // red
-	60*60, // purple
+	60*2,  // yellow
+	60*5, // orange
+	60*10, // red
+	60*20, // purple
 };
 
 class RenderInfo {
@@ -206,12 +208,14 @@ void update_player_status() {
 		float lastPacket = g_Engine.time - state.last_use;
 		
 		bool isLagging = lastPacket > min_lag_detect || state.lag_state == LAG_JOINING;
+		bool shouldSuppressLagsound = (g_Engine.time - state.fully_load_time) < suppress_lag_sounds_time;
 		
 		if (lastPacket > disconnect_message_time) {
 			if (state.lag_state == LAG_NONE) {
 				state.lag_state = LAG_SEVERE_MSG;
 				g_PlayerFuncs.ClientPrintAll(HUD_PRINTNOTIFY, "" + plr.pev.netname + " lost connection to the server.\n");
-				play_sound(plr, dial_snd, 0.5f, dial_loop_dur);
+				if (!shouldSuppressLagsound)
+					play_sound(plr, dial_snd, 0.5f, dial_loop_dur);
 
 				Vector spritePos = plr.pev.origin + Vector(0,0,44);
 			
@@ -269,7 +273,7 @@ void update_player_status() {
 					
 					state.rendermode_applied = true;
 					
-					if (state.lag_state != LAG_JOINING)
+					if (state.lag_state != LAG_JOINING && !shouldSuppressLagsound)
 						play_sound(plr, exclaim_snd, 0.3f);
 				}
 			}
@@ -283,7 +287,8 @@ void update_player_status() {
 			}
 			
 			if (state.rendermode_applied) {
-				play_sound(plr, popup_snd, 0.7f);
+				if (!shouldSuppressLagsound)
+					play_sound(plr, popup_snd, 0.7f);
 				plr.pev.rendermode = state.render_info.rendermode;
 				plr.pev.renderamt = state.render_info.renderamt;
 				plr.pev.renderfx = state.render_info.renderfx;
@@ -433,6 +438,7 @@ void detect_when_loaded(EHandle h_plr, Vector lastAngles, int angleKeyUpdates) {
 		g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " has finished loading.\n");
 		g_player_states[idx].lag_state = LAG_NONE;
 		g_player_states[idx].last_not_afk = g_Engine.time;
+		g_player_states[idx].fully_load_time = g_Engine.time;
 		//println("PLAYER HAS FINISHED LOADING");
 		g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "ALL FINISHED YEAAAYY");
 		return;
@@ -509,6 +515,8 @@ HookReturnCode ClientJoin(CBasePlayer@ plr)
 	g_player_states[idx].last_use_flow_start = g_Engine.time;
 	g_player_states[idx].lag_state = LAG_JOINING;
 	g_player_states[idx].last_not_afk = g_Engine.time;
+	g_player_states[idx].afk_count = 0;
+	g_player_states[idx].total_afk = 0;
 	
 	return HOOK_CONTINUE;
 }
@@ -523,6 +531,7 @@ HookReturnCode ClientLeave(CBasePlayer@ plr)
 	g_player_states[idx].rendermode_applied = false;
 	g_player_states[idx].last_use = 0;
 	g_player_states[idx].connection_time = 0;
+	g_EntityFuncs.Remove(g_player_states[idx].afk_sprite);
 	
 	return HOOK_CONTINUE;
 }
