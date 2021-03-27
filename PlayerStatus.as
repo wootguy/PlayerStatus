@@ -29,6 +29,7 @@ class PlayerState {
 	int afk_count = 0; // number of times afk'd this map
 	float total_afk = 0; // total time afk (minus the current afk session)
 	float fully_load_time = 0; // time the player last fully loaded into the server
+	float lastPostThinkHook = 0; // last time the postThinkHook call ran for this player
 	
 	float get_total_afk_time() {
 		float total = total_afk;
@@ -548,6 +549,7 @@ HookReturnCode ClientJoin(CBasePlayer@ plr)
 	g_player_states[idx].afk_count = 0;
 	g_player_states[idx].total_afk = 0;
 	g_player_states[idx].afk_message_sent = false;
+	g_player_states[idx].lastPostThinkHook = 0;
 	
 	return HOOK_CONTINUE;
 }
@@ -563,6 +565,7 @@ HookReturnCode ClientLeave(CBasePlayer@ plr)
 	g_player_states[idx].last_use = 0;
 	g_player_states[idx].connection_time = 0;
 	g_player_states[idx].afk_message_sent = false;
+	g_player_states[idx].lastPostThinkHook = 0;
 	g_EntityFuncs.Remove(g_player_states[idx].afk_sprite);
 	
 	return HOOK_CONTINUE;
@@ -633,6 +636,14 @@ HookReturnCode PlayerPostThink(CBasePlayer@ plr)
 	}
 	
 	g_player_states[idx].last_button_state = buttons;
+	
+	if (plr.pev.flags & 4096 != 0) {
+		// player is frozen watching a camera (map cutscene
+		// so prevent everyone from going AFK by "stopping" the AFK timer
+		float delta = g_Engine.time - g_player_states[idx].lastPostThinkHook;
+		g_player_states[idx].last_not_afk += delta;
+	}
+	g_player_states[idx].lastPostThinkHook = g_Engine.time;
 	
 	return HOOK_CONTINUE;
 }
