@@ -104,6 +104,7 @@ void PluginInit()  {
 	g_player_states.resize(33);
 	
 	g_Scheduler.SetInterval("update_player_status", 0.1f, -1);
+	g_Scheduler.SetInterval("update_cross_plugin_state", 1.0f, -1);
 }
 
 void MapInit() {
@@ -447,6 +448,35 @@ void detect_when_loaded(EHandle h_plr, Vector lastAngles, int angleKeyUpdates) {
 	g_Scheduler.SetTimeout("detect_when_loaded", 0.1f, h_plr, lastAngles, angleKeyUpdates);
 }
 
+void update_cross_plugin_state() {
+	if (g_Engine.time < 5.0f) {
+		return;
+	}
+
+	CBaseEntity@ afkEnt = g_EntityFuncs.FindEntityByTargetname(null, "PlayerStatusPlugin");
+	
+	if (afkEnt is null) {
+		dictionary keys;
+		keys["targetname"] = "PlayerStatusPlugin";
+		@afkEnt = g_EntityFuncs.CreateEntity( "info_target", keys, true );
+	}
+	
+	CustomKeyvalues@ customKeys = afkEnt.GetCustomKeyvalues();
+	
+	for ( int i = 1; i <= g_Engine.maxClients; i++ )
+	{
+		CBasePlayer@ plr = g_PlayerFuncs.FindPlayerByIndex(i);
+		
+		int afkTime = 0;
+		
+		if (plr !is null and plr.IsConnected()) {
+			PlayerState@ state = g_player_states[i];
+			afkTime = state.afk_message_sent ? int(g_Engine.time - state.last_not_afk) : 0;
+		}
+
+		customKeys.SetKeyvalue("$i_afk" + i, afkTime);
+	}
+}
 
 CBasePlayer@ getAnyPlayer() 
 {
@@ -517,6 +547,7 @@ HookReturnCode ClientJoin(CBasePlayer@ plr)
 	g_player_states[idx].last_not_afk = g_Engine.time;
 	g_player_states[idx].afk_count = 0;
 	g_player_states[idx].total_afk = 0;
+	g_player_states[idx].afk_message_sent = false;
 	
 	return HOOK_CONTINUE;
 }
@@ -531,6 +562,7 @@ HookReturnCode ClientLeave(CBasePlayer@ plr)
 	g_player_states[idx].rendermode_applied = false;
 	g_player_states[idx].last_use = 0;
 	g_player_states[idx].connection_time = 0;
+	g_player_states[idx].afk_message_sent = false;
 	g_EntityFuncs.Remove(g_player_states[idx].afk_sprite);
 	
 	return HOOK_CONTINUE;
