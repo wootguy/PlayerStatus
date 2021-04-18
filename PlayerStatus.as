@@ -18,7 +18,7 @@ class PlayerState {
 	int lag_spike_duration = 0; // time since last player packet when state is LAG_SEVERE_MSG
 	EHandle loading_sprite; // status shown above head
 	EHandle afk_sprite;
-	int lag_state = LAG_NONE;  // 1 = message sent that the player crashed, -1 = joining the game
+	int lag_state = LAG_NONE;
 	RenderInfo render_info; // for undoing the disconnected render model
 	bool rendermode_applied = false; // prevent applying rendermode twice (breaking the undo method)
 	float last_use_flow_start = 0; // last time a consistent flow of PlayerThink calls was started
@@ -362,7 +362,6 @@ void update_player_status() {
 					g_PlayerFuncs.ClientPrintAll(HUD_PRINTNOTIFY, "" + plr.pev.netname + " is AFK for the " + state.afk_count + suffix + " time.\n");
 				}
 				else if (state.afk_count > 1) {
-					
 					g_PlayerFuncs.ClientPrintAll(HUD_PRINTNOTIFY, "" + plr.pev.netname + " is AFK again.\n");
 				} else {
 					g_PlayerFuncs.ClientPrintAll(HUD_PRINTNOTIFY, "" + plr.pev.netname + " is AFK.\n");
@@ -442,7 +441,6 @@ void detect_when_loaded(EHandle h_plr, Vector lastAngles, int angleKeyUpdates) {
 		g_player_states[idx].last_not_afk = g_Engine.time;
 		g_player_states[idx].fully_load_time = g_Engine.time;
 		//println("PLAYER HAS FINISHED LOADING");
-		g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, "ALL FINISHED YEAAAYY");
 		return;
 	}
 	
@@ -469,13 +467,16 @@ void update_cross_plugin_state() {
 		CBasePlayer@ plr = g_PlayerFuncs.FindPlayerByIndex(i);
 		
 		int afkTime = 0;
+		int lagState = LAG_JOINING;
 		
 		if (plr !is null and plr.IsConnected()) {
 			PlayerState@ state = g_player_states[i];
 			afkTime = state.afk_message_sent ? int(g_Engine.time - state.last_not_afk) : 0;
+			lagState = state.lag_state;
 		}
 
 		customKeys.SetKeyvalue("$i_afk" + i, afkTime);
+		customKeys.SetKeyvalue("$i_state" + i, lagState);
 	}
 }
 
@@ -833,7 +834,6 @@ HookReturnCode ClientSay( SayParameters@ pParams ) {
 		if (chatHandled == 2) {
 			pParams.ShouldHide = true;
 		}
-		return HOOK_HANDLED;
 	}
 	
 	return HOOK_CONTINUE;
