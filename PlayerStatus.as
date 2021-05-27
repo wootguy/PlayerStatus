@@ -3,6 +3,9 @@
 // - flashlight + vc should disable afk
 // - recovered from a 0 second lag spike
 // - still not enough time for loading somehow (redmarket)
+// - afk kick doesnt remove loading icon
+// - afk sprite change size
+// - show afk sprite for dead but not gibbed players
 
 void print(string text) { g_Game.AlertMessage( at_console, text); }
 void println(string text) { print(text + "\n"); }
@@ -551,6 +554,10 @@ HookReturnCode ClientJoin(CBasePlayer@ plr)
 	g_player_states[idx].total_afk = 0;
 	g_player_states[idx].afk_message_sent = false;
 	g_player_states[idx].lastPostThinkHook = 0;
+	
+	if (g_EngineFuncs.GetPlayerAuthId( plr.edict() ) == "BOT") {
+		g_player_states[idx].lag_state = LAG_NONE;
+	}
 	
 	return HOOK_CONTINUE;
 }
