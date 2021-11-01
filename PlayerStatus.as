@@ -60,8 +60,7 @@ float min_flow_time = 6.0f;
 float suppress_lag_sounds_time = 10.0f; // time after joining to silence the lag sounds (can get spammy on map changes)
 
 float dial_loop_dur = 26.0; // duration of the dialup sound loop
-
-
+float last_afk_chat = -9999;
 bool debug_mode = false;
 
 // time in seconds for different levels of afk
@@ -140,6 +139,8 @@ void MapInit() {
 	
 	g_player_states.resize(0);
 	g_player_states.resize(33);
+	
+	last_afk_chat = -999;
 }
 
 void MapActivate() {
@@ -439,11 +440,10 @@ void detect_when_loaded(EHandle h_plr, Vector lastAngles, int angleKeyUpdates) {
 		int loadTime = int((g_Engine.time - g_player_states[idx].connection_time) + 0.5f - flow_time);		
 		string plural = loadTime != 1 ? "s" : "";
 		//g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " has finished loading (" + loadTime +" seconds).\n");
-		g_PlayerFuncs.SayTextAll(plr, "- " + plr.pev.netname + " has finished loading.\n");
+		g_PlayerFuncs.ClientPrintAll(HUD_PRINTNOTIFY, "" + plr.pev.netname + " has finished loading.\n");
 		g_player_states[idx].lag_state = LAG_NONE;
 		g_player_states[idx].last_not_afk = g_Engine.time;
 		g_player_states[idx].fully_load_time = g_Engine.time;
-		//println("PLAYER HAS FINISHED LOADING");
 		return;
 	}
 	
@@ -724,6 +724,13 @@ int doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand=fals
 		}
 		
 		if (args[0] == "afk?") {
+			if (g_Engine.time - last_afk_chat < 60.0f) {
+				int cooldown = 60 - int(g_Engine.time - last_afk_chat);
+				g_PlayerFuncs.ClientPrintAll(HUD_PRINTCENTER, "Wait " + cooldown + " seconds\n");
+				return 2;
+			}
+			last_afk_chat = g_Engine.time;
+		
 			int totalAfk = 0;
 			int totalPlayers = 0;
 			
@@ -840,6 +847,7 @@ HookReturnCode ClientSay( SayParameters@ pParams ) {
 	{
 		if (chatHandled == 2) {
 			pParams.ShouldHide = true;
+			return HOOK_HANDLED;
 		}
 	}
 	
