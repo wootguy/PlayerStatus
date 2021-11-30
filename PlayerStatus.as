@@ -48,6 +48,7 @@ class PlayerState {
 }
 
 array<PlayerState> g_player_states;
+dictionary g_afk_stats; // maps steam id to afk time for players who leave the game
 
 float disconnect_message_time = 4.0f; // player considered disconnected after this many seconds
 float min_lag_detect = 0.3f; // minimum amount of a time a player needs to be disconnected before the icon shows
@@ -82,7 +83,7 @@ class RenderInfo {
 string loading_spr = "sprites/windows/hourglass.spr";
 string warn_spr = "sprites/windows/xpwarn.spr";
 string dial_spr = "sprites/windows/dial.spr";
-string afk_spr = "sprites/zzz.spr";
+string afk_spr = "sprites/zzz_v2.spr";
 
 string error_snd = "winxp/critical_stop.wav";
 string startup_snd = "winxp/startup.wav";
@@ -101,8 +102,9 @@ void PluginInit()  {
 	g_Hooks.RegisterHook(Hooks::Player::ClientConnected, @ClientConnect);
 	g_Hooks.RegisterHook( Hooks::Player::ClientPutInServer, @ClientJoin );
 	g_Hooks.RegisterHook( Hooks::Player::ClientDisconnect, @ClientLeave );
-	g_Hooks.RegisterHook( Hooks::Player::PlayerPostThink, @PlayerPostThink );
+	g_Hooks.RegisterHook( Hooks::Player::PlayerPreThink, @PlayerPreThink );
 	g_Hooks.RegisterHook( Hooks::Player::ClientSay, @ClientSay );
+	g_Hooks.RegisterHook(Hooks::Game::MapChange, @MapChange);
 	
 	g_player_states.resize(33);
 	
@@ -141,10 +143,45 @@ void MapInit() {
 	g_player_states.resize(33);
 	
 	last_afk_chat = -999;
+	g_afk_stats.clear();
 }
 
 void MapActivate() {
 	modify_spawn_points_for_loading_detection();
+}
+
+HookReturnCode MapChange() {
+	for ( int i = 1; i <= g_Engine.maxClients; i++ )
+	{
+		CBasePlayer@ p = g_PlayerFuncs.FindPlayerByIndex(i);
+		
+		if (p is null or !p.IsConnected()) {
+			continue;
+		}
+		
+		PlayerState@ state = g_player_states[i];
+		string steamid = getUniqueId(p);
+		int totalAfk = int(state.get_total_afk_time());
+		
+		if (g_afk_stats.exists(steamid)) {
+			totalAfk += int(g_afk_stats[steamid]);
+			g_afk_stats.delete(steamid);
+		}
+		
+		string msg = "[AfkStats] " + steamid + " " + totalAfk + " " + p.pev.netname + "\n";
+		g_Game.AlertMessage(at_console, msg);
+		g_Game.AlertMessage(at_logged, msg);
+	}
+	
+	array<string>@ afkKeys = g_afk_stats.getKeys();
+	for (uint i = 0; i < afkKeys.length(); i++) {
+		int afkTime = int(g_afk_stats[afkKeys[i]]);
+		string msg = "[AfkStats] " + afkKeys[i] + " " + afkTime + " \\disconnected_player\\\n";
+		g_Game.AlertMessage(at_console, msg);
+		g_Game.AlertMessage(at_logged, msg);
+	}
+	
+	return HOOK_CONTINUE;
 }
 
 // Normally, this happens when a player joins the game, and it's easy to detect when a player is loaded:
@@ -309,10 +346,10 @@ void update_player_status() {
 			bool ok_to_afk = g_SurvivalMode.IsActive() && !plr.IsAlive();
 			
 			float afkTime = g_Engine.time - state.last_not_afk;
-			if (!ok_to_afk && afkTime > afk_tier[0] && (plr.pev.effects & EF_NODRAW) == 0) {
+			float gracePeriod = 2.0f; // allow other plugins to get the updated AFK state before the sprite is shown
+			if (!ok_to_afk && afkTime > afk_tier[0]+gracePeriod && (plr.pev.effects & EF_NODRAW) == 0) {
 				if (!state.afk_sprite.IsValid()) {
 					dictionary keys;
-					keys["origin"] = spritePos.ToString();
 					keys["model"] = afk_spr;
 					keys["rendermode"] = "2";
 					keys["renderamt"] = "255";
@@ -325,7 +362,8 @@ void update_player_status() {
 				}
 			
 				CBaseEntity@ afkSprite = state.afk_sprite;
-				afkSprite.pev.origin = spritePos;
+				afkSprite.pev.movetype = MOVETYPE_FOLLOW;
+				@afkSprite.pev.aiment = @plr.edict();
 				
 				Vector color = Vector(0, 255, 255);
 				if (afkTime > afk_tier[5]) {
@@ -474,7 +512,8 @@ void update_cross_plugin_state() {
 		
 		if (plr !is null and plr.IsConnected()) {
 			PlayerState@ state = g_player_states[i];
-			afkTime = state.afk_message_sent ? int(g_Engine.time - state.last_not_afk) : 0;
+			afkTime = int(g_Engine.time - state.last_not_afk);
+			afkTime = afkTime >= afk_tier[0] ? afkTime : 0;
 			lagState = state.lag_state;
 		}
 
@@ -576,6 +615,15 @@ HookReturnCode ClientLeave(CBasePlayer@ plr)
 	g_player_states[idx].lastPostThinkHook = 0;
 	g_EntityFuncs.Remove(g_player_states[idx].afk_sprite);
 	
+	PlayerState@ state = g_player_states[idx];
+	string steamid = getUniqueId(plr);
+	if (g_afk_stats.exists(steamid)) {
+		g_afk_stats[steamid] = int(g_afk_stats[steamid]) + state.get_total_afk_time();
+	} else {
+		g_afk_stats[steamid] = state.get_total_afk_time();
+	}
+	
+	
 	return HOOK_CONTINUE;
 }
 
@@ -619,7 +667,7 @@ void return_from_afk_message(CBasePlayer@ plr) {
 	}
 }
 
-HookReturnCode PlayerPostThink(CBasePlayer@ plr)
+HookReturnCode PlayerPreThink( CBasePlayer@ plr, uint& out uiFlags )
 {
 	int idx = plr.entindex();
 	if (g_player_states[idx].lag_state == LAG_SEVERE_MSG) {
