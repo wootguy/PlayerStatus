@@ -116,7 +116,7 @@ void PluginInit()  {
 	g_Scheduler.SetInterval("update_cross_plugin_state", 1.0f, -1);
 	g_Scheduler.SetInterval("punish_afk_players", 1.0f, -1);
 	
-	@cvar_afk_punish_time = CCVar("afk_penalty_time", 6, "players afk for this long may be killed/kicked", ConCommandFlag::AdminOnly);
+	@cvar_afk_punish_time = CCVar("afk_penalty_time", 0, "players afk for this long may be killed/kicked", ConCommandFlag::AdminOnly);
 }
 
 void MapInit() {
