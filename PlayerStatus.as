@@ -94,6 +94,10 @@ string popup_snd = "winxp/balloon.wav";
 string dial_snd = "winxp/dial.wav";
 
 float loading_spr_framerate = 10; // max of 15 fps before frames are dropped
+int g_survival_afk_kill_countdown = 3;
+int KILL_AFK_IN_SURVIVAL_DELAY = 3; // how long to wait before killing the last living players in survival mode, if they're all afk
+
+CCVar@ cvar_afk_punish_time;
 
 void PluginInit()  {
 	g_Module.ScriptInfo.SetAuthor( "w00tguy" );
@@ -110,6 +114,9 @@ void PluginInit()  {
 	
 	g_Scheduler.SetInterval("update_player_status", 0.1f, -1);
 	g_Scheduler.SetInterval("update_cross_plugin_state", 1.0f, -1);
+	g_Scheduler.SetInterval("punish_afk_players", 1.0f, -1);
+	
+	@cvar_afk_punish_time = CCVar("afk_penalty_time", 6, "players afk for this long may be killed/kicked", ConCommandFlag::AdminOnly);
 }
 
 void MapInit() {
@@ -139,6 +146,8 @@ void MapInit() {
 	g_SoundSystem.PrecacheSound(dial_snd);
 	g_Game.PrecacheGeneric("sound/" + dial_snd);
 	
+	g_SoundSystem.PrecacheSound("thunder.wav");
+	
 	g_player_states.resize(0);
 	g_player_states.resize(33);
 	
@@ -149,7 +158,6 @@ void MapInit() {
 void MapActivate() {
 	modify_spawn_points_for_loading_detection();
 }
-
 HookReturnCode MapChange() {
 	for ( int i = 1; i <= g_Engine.maxClients; i++ )
 	{
@@ -217,7 +225,6 @@ void modify_spawn_points_for_loading_detection() {
 		println("PlayerStatus: updated " + updateCount + " spawn points to help with player load detection");
 	}
 }
-
 string getUniqueId(CBasePlayer@ plr) {
 	string steamid = g_EngineFuncs.GetPlayerAuthId( plr.edict() );
 
@@ -410,6 +417,128 @@ void update_player_status() {
 				}
 			}
 		}
+	}
+}
+
+void punish_afk_players() {
+	if (cvar_afk_punish_time.GetInt() == 0) {
+		return;
+	}
+
+	int numAliveActive = 0;
+	int numAliveAfk = 0;
+	int numPlayers = 0;
+	array<CBasePlayer@> afkPlayers;
+
+	for ( int i = 1; i <= g_Engine.maxClients; i++ )
+	{
+		CBasePlayer@ plr = g_PlayerFuncs.FindPlayerByIndex(i);
+		
+		if (plr is null or !plr.IsConnected()) {
+			continue;
+		}
+		
+		numPlayers += 1;
+		
+		PlayerState@ state = g_player_states[i];
+		
+		int afkTime = int(g_Engine.time - state.last_not_afk);
+		bool isAfk = afkTime >= cvar_afk_punish_time.GetInt();
+		
+		if (isAfk) {
+			if (plr.IsAlive()) {
+				numAliveAfk += 1;
+			}
+			
+			afkPlayers.insertLast(plr);
+		} else if (plr.IsAlive()) {
+			numAliveActive += 1;
+		}
+	}
+	
+	bool everyoneIsAfk = int(afkPlayers.size()) == numPlayers;
+	bool lastLivingPlayersAreAfk = numAliveActive == 0 and numAliveAfk > 0;
+	
+	if (g_SurvivalMode.IsActive() and lastLivingPlayersAreAfk and !everyoneIsAfk) {
+		// all living players are AFK
+		if (g_survival_afk_kill_countdown == KILL_AFK_IN_SURVIVAL_DELAY) {
+			g_PlayerFuncs.ClientPrintAll(HUD_PRINTTALK, "All living players are AFK and will be killed in " + KILL_AFK_IN_SURVIVAL_DELAY + " seconds.\n");
+		}
+		
+		g_survival_afk_kill_countdown -= 1;
+	
+		if (g_survival_afk_kill_countdown < 0) {
+			g_survival_afk_kill_countdown = KILL_AFK_IN_SURVIVAL_DELAY;
+			
+			for (uint i = 0; i < afkPlayers.size(); i++) {
+				CBasePlayer@ plr = afkPlayers[i];
+				
+				if (plr.IsAlive()) {
+					TraceResult tr;
+					g_Utility.TraceLine(plr.pev.origin, plr.pev.origin + Vector(0,0,1)*4096, ignore_monsters, plr.edict(), tr);
+					
+					NetworkMessage message(MSG_BROADCAST, NetworkMessages::SVC_TEMPENTITY, null);
+						message.WriteByte(TE_BEAMPOINTS);
+						message.WriteCoord(plr.pev.origin.x);
+						message.WriteCoord(plr.pev.origin.y);
+						message.WriteCoord(plr.pev.origin.z);
+						message.WriteCoord(tr.vecEndPos.x);
+						message.WriteCoord(tr.vecEndPos.y);
+						message.WriteCoord(tr.vecEndPos.z);
+						message.WriteShort(g_EngineFuncs.ModelIndex("sprites/laserbeam.spr"));
+						message.WriteByte(0);
+						message.WriteByte(1);
+						message.WriteByte(2);
+						message.WriteByte(16);
+						message.WriteByte(64);
+						message.WriteByte(175);
+						message.WriteByte(215);
+						message.WriteByte(255);
+						message.WriteByte(255);
+						message.WriteByte(0);
+					message.End();
+						
+					NetworkMessage message2(MSG_BROADCAST, NetworkMessages::SVC_TEMPENTITY, null);
+						message2.WriteByte(TE_DLIGHT);
+						message2.WriteCoord(plr.pev.origin.x);
+						message2.WriteCoord(plr.pev.origin.y);
+						message2.WriteCoord(plr.pev.origin.z);
+						message2.WriteByte(24);
+						message2.WriteByte(175);
+						message2.WriteByte(215);
+						message2.WriteByte(255);
+						message2.WriteByte(4);
+						message2.WriteByte(88);
+					message2.End();
+					
+					g_EntityFuncs.Remove(afkPlayers[i]);
+				}
+			}
+			
+			g_SoundSystem.PlaySound(g_EntityFuncs.Instance(0).edict(), CHAN_STATIC, "thunder.wav", 0.67f, 0.0f, 0, 100);
+		}
+	} else {
+		if (g_survival_afk_kill_countdown != KILL_AFK_IN_SURVIVAL_DELAY) {
+			string reason = "Someone woke up.";
+			if (everyoneIsAfk) {
+				reason = "Everyone is AFK now...";
+			} else if (!g_SurvivalMode.IsActive()) {
+				reason = "Survival mode was disabled.";
+			}
+			
+			g_PlayerFuncs.ClientPrintAll(HUD_PRINTTALK, "AFK kill aborted. " + reason + "\n");
+		}
+		g_survival_afk_kill_countdown = KILL_AFK_IN_SURVIVAL_DELAY;
+	}
+	
+	if (numPlayers == g_Engine.maxClients and afkPlayers.size() > 0) {
+		// kick a random AFK player to make room for someone who wants to play
+		CBasePlayer@ randomPlayer = afkPlayers[Math.RandomLong(0, afkPlayers.size()-1)];
+		string pname = randomPlayer.pev.netname;
+		
+		g_EngineFuncs.ServerCommand("kick #" + g_EngineFuncs.GetPlayerUserId(randomPlayer.edict()) + " You were AFK on a full server.\n");
+		g_EngineFuncs.ServerExecute();
+		g_PlayerFuncs.ClientPrintAll(HUD_PRINTTALK, pname + " was kicked for being AFK on a full server.\n" );
 	}
 }
 
@@ -682,7 +811,7 @@ HookReturnCode PlayerPreThink( CBasePlayer@ plr, uint& out uiFlags )
 		
 	g_player_states[idx].last_use = g_Engine.time;
 	
-	int buttons = plr.m_afButtonPressed & ~32768; // for some reason the scoreboard button is pressed on death/respawn	
+	int buttons = (plr.m_afButtonPressed | plr.m_afButtonReleased) & ~32768; // for some reason the scoreboard button is pressed on death/respawn	
 	
 	if (buttons != g_player_states[idx].last_button_state) {
 		return_from_afk_message(plr);
