@@ -33,6 +33,7 @@ class PlayerState {
 	float total_afk = 0; // total time afk (minus the current afk session)
 	float fully_load_time = 0; // time the player last fully loaded into the server
 	float lastPostThinkHook = 0; // last time the postThinkHook call ran for this player
+	float lastPossess = 0;
 	
 	float get_total_afk_time() {
 		float total = total_afk;
@@ -92,10 +93,12 @@ string exclaim_snd = "winxp/exclaim.wav";
 string logon_snd = "winxp/logon.wav";
 string popup_snd = "winxp/balloon.wav";
 string dial_snd = "winxp/dial.wav";
+string possess_snd = "debris/bustflesh1.wav";
 
 float loading_spr_framerate = 10; // max of 15 fps before frames are dropped
 int g_survival_afk_kill_countdown = 3;
 int KILL_AFK_IN_SURVIVAL_DELAY = 3; // how long to wait before killing the last living players in survival mode, if they're all afk
+const int POSSESS_COOLDOWN = 30;
 
 CCVar@ cvar_afk_punish_time;
 
@@ -116,7 +119,7 @@ void PluginInit()  {
 	g_Scheduler.SetInterval("update_cross_plugin_state", 1.0f, -1);
 	g_Scheduler.SetInterval("punish_afk_players", 1.0f, -1);
 	
-	@cvar_afk_punish_time = CCVar("afk_penalty_time", 0, "players afk for this long may be killed/kicked", ConCommandFlag::AdminOnly);
+	@cvar_afk_punish_time = CCVar("afk_penalty_time", 60, "players afk for this long may be killed/kicked", ConCommandFlag::AdminOnly);
 }
 
 void MapInit() {
@@ -147,6 +150,7 @@ void MapInit() {
 	g_Game.PrecacheGeneric("sound/" + dial_snd);
 	
 	g_SoundSystem.PrecacheSound("thunder.wav");
+	g_SoundSystem.PrecacheSound(possess_snd);
 	
 	g_player_states.resize(0);
 	g_player_states.resize(33);
@@ -796,6 +800,95 @@ void return_from_afk_message(CBasePlayer@ plr) {
 	}
 }
 
+void possess(CBasePlayer@ plr) {
+	Math.MakeVectors( plr.pev.v_angle );
+	Vector lookDir = g_Engine.v_forward;
+	int eidx = plr.entindex();
+	
+	TraceResult tr;
+	g_Utility.TraceLine( plr.pev.origin, plr.pev.origin + lookDir*4096, dont_ignore_monsters, plr.edict(), tr );
+	CBasePlayer@ phit = cast<CBasePlayer@>(g_EntityFuncs.Instance( tr.pHit ));
+	
+	if (phit is null or !phit.IsAlive()) {
+		//g_PlayerFuncs.ClientPrint(plr, HUD_PRINTTALK, "Look at an AFK player you want to posess, then try again.\n");
+		return;
+	}
+	
+	if ((tr.vecEndPos - plr.pev.origin).Length() > 256) {
+		//g_PlayerFuncs.ClientPrint(plr, HUD_PRINTTALK, "Get closer to the player you want to posess, then try again.\n");
+		return;
+	}
+	
+	int timeSinceLast = int(g_Engine.time - g_player_states[eidx].lastPossess);
+	int cooldown = POSSESS_COOLDOWN - timeSinceLast;
+	if (cooldown > 0) {
+		g_PlayerFuncs.ClientPrint(plr, HUD_PRINTTALK, "Wait " + cooldown + " seconds before possessing another player.\n");
+		return;
+	}
+	
+	float afkTime = g_Engine.time - g_player_states[phit.entindex()].last_not_afk;
+	int afkLeft = int(afk_tier[1] - afkTime);
+	if (afkTime < afk_tier[1]) {
+		if (afkTime >= afk_tier[0]) {
+			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTTALK, "" + phit.pev.netname + " hasn't been AFK long enough for possession (" + afkLeft + "s left).\n");
+		}
+		return;
+	}
+	
+	plr.EndRevive(0);
+	g_player_states[eidx].lastPossess = g_Engine.time;
+	copy_possessed_player(EHandle(plr), EHandle(phit), g_Engine.time);
+}
+
+void copy_possessed_player(EHandle h_ghost, EHandle h_target, float startTime) {
+	CBasePlayer@ ghost = cast<CBasePlayer@>(h_ghost.GetEntity());
+	CBasePlayer@ target = cast<CBasePlayer@>(h_target.GetEntity());
+	
+	if (ghost is null or target is null) {
+		return;
+	}
+	
+	if (!ghost.IsAlive()) {
+		float delay = g_Engine.time - startTime;
+		
+		if (delay > 3) {
+			g_PlayerFuncs.ClientPrint(ghost, HUD_PRINTTALK, "Failed to possess player.\n");
+		} else {
+			g_Scheduler.SetTimeout("copy_possessed_player", 0.0f, h_ghost, h_target, startTime);
+		}
+
+		return;
+	}
+	
+	ghost.pev.origin = target.pev.origin;
+	ghost.pev.angles = target.pev.v_angle;
+	ghost.pev.fixangle = FAM_FORCEVIEWANGLES;
+	ghost.pev.health = target.pev.health;
+	ghost.pev.armorvalue = target.pev.armorvalue;
+	
+	if (target.IsAlive()) {
+		target.GetObserver().StartObserver(target.pev.origin, target.pev.v_angle, false);
+		target.GetObserver().SetMode(OBS_CHASE_FREE);
+		target.GetObserver().SetObserverTarget(ghost);
+	}
+	
+	g_SoundSystem.PlaySound(ghost.edict(), CHAN_STATIC, possess_snd, 1.0f, 0.0f, 0, 150);
+	te_teleport(ghost.pev.origin);
+	
+	g_PlayerFuncs.ClientPrintAll(HUD_PRINTNOTIFY, "" + ghost.pev.netname + " possessed " + target.pev.netname + ".\n");
+	g_PlayerFuncs.ClientPrint(target, HUD_PRINTTALK, "" + ghost.pev.netname + " possessed you.\n");
+}
+
+void te_teleport(Vector pos, NetworkMessageDest msgType=MSG_BROADCAST, edict_t@ dest=null)
+{
+	NetworkMessage m(msgType, NetworkMessages::SVC_TEMPENTITY, dest);
+	m.WriteByte(TE_TELEPORT);
+	m.WriteCoord(pos.x);
+	m.WriteCoord(pos.y);
+	m.WriteCoord(pos.z);
+	m.End();
+}
+
 HookReturnCode PlayerPreThink( CBasePlayer@ plr, uint& out uiFlags )
 {
 	int idx = plr.entindex();
@@ -821,6 +914,10 @@ HookReturnCode PlayerPreThink( CBasePlayer@ plr, uint& out uiFlags )
 	}
 	
 	g_player_states[idx].last_button_state = buttons;
+	
+	if (plr.m_afButtonReleased & IN_USE != 0 and plr.GetObserver().IsObserver()) {
+		possess(plr);
+	}
 	
 	if (plr.pev.flags & 4096 != 0) {
 		// player is frozen watching a camera (map cutscene
