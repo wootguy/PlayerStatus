@@ -807,6 +807,16 @@ void return_from_afk_message(CBasePlayer@ plr) {
 	}
 }
 
+class CorpseInfo {
+	bool hasCorpse = false;
+	Vector origin;
+	Vector angles;
+	int sequence;
+	float frame;
+	
+	CorpseInfo() {}
+}
+
 void possess(CBasePlayer@ plr) {
 	Math.MakeVectors( plr.pev.v_angle );
 	Vector lookDir = g_Engine.v_forward;
@@ -851,14 +861,62 @@ void possess(CBasePlayer@ plr) {
 		return;
 	}
 	
+	CorpseInfo corpseInfo;
+	
+	if (plr.GetObserver().IsObserver() && plr.GetObserver().HasCorpse()) {
+		CBaseEntity@ ent = null;
+		do {
+			@ent = g_EntityFuncs.FindEntityByClassname(ent, "deadplayer"); 
+			if (ent !is null) {
+				CustomKeyvalues@ pCustom = ent.GetCustomKeyvalues();
+				CustomKeyvalue ownerKey( pCustom.GetKeyvalue( "$i_hipoly_owner" ) );
+				
+				if (ownerKey.Exists() && ownerKey.GetInteger() == plr.entindex()) {
+					corpseInfo.hasCorpse = true;
+					corpseInfo.origin = ent.pev.origin;
+					corpseInfo.angles = ent.pev.angles;
+					corpseInfo.sequence = ent.pev.sequence;
+					corpseInfo.frame = ent.pev.frame;
+				}
+			}
+		} while (ent !is null);
+	}
+	
 	int oldSolid = phit.pev.solid;
 	phit.pev.solid = SOLID_NOT;
 	plr.EndRevive(0);
 	g_player_states[eidx].lastPossess = g_Engine.time;
-	copy_possessed_player(EHandle(plr), EHandle(phit), g_Engine.time, oldSolid);
+	copy_possessed_player(EHandle(plr), EHandle(phit), g_Engine.time, oldSolid, corpseInfo);
 }
 
-void copy_possessed_player(EHandle h_ghost, EHandle h_target, float startTime, int oldSolid) {
+void move_corpse(EHandle h_deadPlayer, CorpseInfo corpseInfo) {
+	CBasePlayer@ plr = cast<CBasePlayer@>(h_deadPlayer.GetEntity());
+	if (plr is null) {
+		return;
+	}
+	
+	if (plr.GetObserver().IsObserver() && plr.GetObserver().HasCorpse()) {
+		CBaseEntity@ ent = null;
+		do {
+			@ent = g_EntityFuncs.FindEntityByClassname(ent, "deadplayer"); 
+			if (ent !is null) {
+				CustomKeyvalues@ pCustom = ent.GetCustomKeyvalues();
+				CustomKeyvalue ownerKey( pCustom.GetKeyvalue( "$i_hipoly_owner" ) );
+				
+				if (ownerKey.Exists() && ownerKey.GetInteger() == plr.entindex()) {
+					ent.pev.origin = corpseInfo.origin;
+					ent.pev.angles = corpseInfo.angles;
+					ent.pev.sequence = corpseInfo.sequence;
+					ent.pev.frame = corpseInfo.frame;
+					te_teleport(ent.pev.origin);
+					g_SoundSystem.PlaySound(ent.edict(), CHAN_STATIC, possess_snd, 1.0f, 0.5f, 0, 150);
+				}
+			}
+		} while (ent !is null);
+	}
+}
+
+void copy_possessed_player(EHandle h_ghost, EHandle h_target, float startTime, int oldSolid, CorpseInfo corpseInfo) {
 	CBasePlayer@ ghost = cast<CBasePlayer@>(h_ghost.GetEntity());
 	CBasePlayer@ target = cast<CBasePlayer@>(h_target.GetEntity());
 	
@@ -874,7 +932,7 @@ void copy_possessed_player(EHandle h_ghost, EHandle h_target, float startTime, i
 			target.pev.solid = oldSolid;
 			g_player_states[ghost.entindex()].lastPossess = -999;
 		} else {
-			g_Scheduler.SetTimeout("copy_possessed_player", 0.0f, h_ghost, h_target, startTime, oldSolid);
+			g_Scheduler.SetTimeout("copy_possessed_player", 0.0f, h_ghost, h_target, startTime, oldSolid, corpseInfo);
 		}
 
 		return;
@@ -890,12 +948,14 @@ void copy_possessed_player(EHandle h_ghost, EHandle h_target, float startTime, i
 	ghost.pev.view_ofs = Vector(0,0,12);
 	
 	if (target.IsAlive()) {
-		target.GetObserver().StartObserver(target.pev.origin, target.pev.v_angle, false);
-		target.GetObserver().SetMode(OBS_CHASE_FREE);
-		target.GetObserver().SetObserverTarget(ghost);
+		target.GetObserver().StartObserver(target.pev.origin, target.pev.v_angle, corpseInfo.hasCorpse);
+		
+		if (corpseInfo.hasCorpse) {
+			g_Scheduler.SetTimeout("move_corpse", 0.0f, h_target, corpseInfo);
+		}
 	}
 	
-	g_SoundSystem.PlaySound(ghost.edict(), CHAN_STATIC, possess_snd, 1.0f, 0.0f, 0, 150);
+	g_SoundSystem.PlaySound(ghost.edict(), CHAN_STATIC, possess_snd, 1.0f, 0.5f, 0, 150);
 	te_teleport(ghost.pev.origin);
 	
 	g_PlayerFuncs.ClientPrintAll(HUD_PRINTNOTIFY, "" + ghost.pev.netname + " possessed " + target.pev.netname + ".\n");
