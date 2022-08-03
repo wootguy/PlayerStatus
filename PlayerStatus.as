@@ -34,6 +34,8 @@ class PlayerState {
 	float fully_load_time = 0; // time the player last fully loaded into the server
 	float lastPostThinkHook = 0; // last time the postThinkHook call ran for this player
 	float lastPossess = 0;
+	float lastRespawn = 0;
+	bool wasAlive = false;
 	
 	float get_total_afk_time() {
 		float total = total_afk;
@@ -258,6 +260,11 @@ void update_player_status() {
 		if (debug_mode && plr.pev.netname != "w00tguy") {
 			continue;
 		}
+		
+		if (plr.IsAlive() and !state.wasAlive) {
+			state.lastRespawn = g_Engine.time;
+		}
+		state.wasAlive = plr.IsAlive();
 		
 		float lastPacket = g_Engine.time - state.last_use;
 		
@@ -814,11 +821,13 @@ void possess(CBasePlayer@ plr) {
 		return;
 	}
 	
+	PlayerState@ phitState = g_player_states[phit.entindex()];
+	
 	if ((tr.vecEndPos - plr.pev.origin).Length() > 256) {
 		//g_PlayerFuncs.ClientPrint(plr, HUD_PRINTTALK, "Get closer to the player you want to posess, then try again.\n");
 		return;
 	}
-	
+
 	int timeSinceLast = int(g_Engine.time - g_player_states[eidx].lastPossess);
 	int cooldown = POSSESS_COOLDOWN - timeSinceLast;
 	if (cooldown > 0) {
@@ -826,8 +835,8 @@ void possess(CBasePlayer@ plr) {
 		return;
 	}
 	
-	float afkTime = g_Engine.time - g_player_states[phit.entindex()].last_not_afk;
-	int afkLeft = int(afk_tier[1] - afkTime);
+	float afkTime = g_Engine.time - phitState.last_not_afk;
+	int afkLeft = int((afk_tier[1] - afkTime) + 0.99f);
 	if (afkTime < afk_tier[1]) {
 		if (afkTime >= afk_tier[0]) {
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTTALK, "" + phit.pev.netname + " hasn't been AFK long enough for possession (" + afkLeft + "s left).\n");
@@ -835,12 +844,21 @@ void possess(CBasePlayer@ plr) {
 		return;
 	}
 	
+	float liveTime = g_Engine.time - phitState.lastRespawn;
+	int liveLeft = int((afk_tier[1] - liveTime) + 0.99f);
+	if (liveLeft > 0) {
+		g_PlayerFuncs.ClientPrint(plr, HUD_PRINTTALK, "" + phit.pev.netname + " hasn't been alive long enough for possession (" + liveLeft + "s left).\n");
+		return;
+	}
+	
+	int oldSolid = phit.pev.solid;
+	phit.pev.solid = SOLID_NOT;
 	plr.EndRevive(0);
 	g_player_states[eidx].lastPossess = g_Engine.time;
-	copy_possessed_player(EHandle(plr), EHandle(phit), g_Engine.time);
+	copy_possessed_player(EHandle(plr), EHandle(phit), g_Engine.time, oldSolid);
 }
 
-void copy_possessed_player(EHandle h_ghost, EHandle h_target, float startTime) {
+void copy_possessed_player(EHandle h_ghost, EHandle h_target, float startTime, int oldSolid) {
 	CBasePlayer@ ghost = cast<CBasePlayer@>(h_ghost.GetEntity());
 	CBasePlayer@ target = cast<CBasePlayer@>(h_target.GetEntity());
 	
@@ -853,8 +871,10 @@ void copy_possessed_player(EHandle h_ghost, EHandle h_target, float startTime) {
 		
 		if (delay > 3) {
 			g_PlayerFuncs.ClientPrint(ghost, HUD_PRINTTALK, "Failed to possess player.\n");
+			target.pev.solid = oldSolid;
+			g_player_states[ghost.entindex()].lastPossess = -999;
 		} else {
-			g_Scheduler.SetTimeout("copy_possessed_player", 0.0f, h_ghost, h_target, startTime);
+			g_Scheduler.SetTimeout("copy_possessed_player", 0.0f, h_ghost, h_target, startTime, oldSolid);
 		}
 
 		return;
@@ -865,6 +885,9 @@ void copy_possessed_player(EHandle h_ghost, EHandle h_target, float startTime) {
 	ghost.pev.fixangle = FAM_FORCEVIEWANGLES;
 	ghost.pev.health = target.pev.health;
 	ghost.pev.armorvalue = target.pev.armorvalue;
+	ghost.pev.flDuckTime = 26;
+	ghost.pev.flags |= FL_DUCKING;
+	ghost.pev.view_ofs = Vector(0,0,12);
 	
 	if (target.IsAlive()) {
 		target.GetObserver().StartObserver(target.pev.origin, target.pev.v_angle, false);
