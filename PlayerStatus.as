@@ -66,6 +66,7 @@ float suppress_lag_sounds_time = 10.0f; // time after joining to silence the lag
 float dial_loop_dur = 26.0; // duration of the dialup sound loop
 float last_afk_chat = -9999;
 bool debug_mode = false;
+int afk_possess_alive_time = 30;
 
 // time in seconds for different levels of afk
 array<int> afk_tier = {
