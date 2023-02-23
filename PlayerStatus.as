@@ -66,7 +66,12 @@ float suppress_lag_sounds_time = 10.0f; // time after joining to silence the lag
 float dial_loop_dur = 26.0; // duration of the dialup sound loop
 float last_afk_chat = -9999;
 bool debug_mode = false;
-int afk_possess_alive_time = 30;
+int afk_possess_alive_time = 20;
+
+array<string> possess_map_blacklist = {
+	"fallguys_s2",
+	"fallguys_s3"
+};
 
 // time in seconds for different levels of afk
 array<int> afk_tier = {
@@ -331,7 +336,7 @@ void update_player_status() {
 					plr.pev.renderamt = 144; // min amt that doesn't dip below 128 when fading (which causes rendering errors on some models)
 					plr.pev.renderfx = 2;
 					
-					println("Applying ghost rendermode to " + plr.pev.netname);
+					//println("Applying ghost rendermode to " + plr.pev.netname);
 					
 					state.rendermode_applied = true;
 					
@@ -355,7 +360,7 @@ void update_player_status() {
 				plr.pev.renderamt = state.render_info.renderamt;
 				plr.pev.renderfx = state.render_info.renderfx;
 				state.rendermode_applied = false;
-				println("Restored normal rendermode to " + plr.pev.netname);
+				//println("Restored normal rendermode to " + plr.pev.netname);
 			}
 			
 			g_EntityFuncs.Remove(state.loading_sprite);
@@ -575,14 +580,14 @@ void loop_sound(EHandle h_target, string snd, float vol, float loopDelay) {
 
 void detect_when_loaded(EHandle h_plr, Vector lastAngles, int angleKeyUpdates) {
 	if (!h_plr.IsValid()) {
-		println("ABORT DETECT HANDLE NOT VALID");
+		//println("ABORT DETECT HANDLE NOT VALID");
 		return;
 	}
 	
 	CBasePlayer@ plr = cast<CBasePlayer@>(h_plr.GetEntity());
 	
 	if (plr is null or !plr.IsConnected()) {
-		println("ABORT DETECT PLR IS NULL OR NOT CONNECTED");
+		//println("ABORT DETECT PLR IS NULL OR NOT CONNECTED");
 		return;
 	}
 	
@@ -838,6 +843,11 @@ void possess(CBasePlayer@ plr) {
 		//g_PlayerFuncs.ClientPrint(plr, HUD_PRINTTALK, "Get closer to the player you want to posess, then try again.\n");
 		return;
 	}
+	
+	if (possess_map_blacklist.find(g_Engine.mapname)) {
+		g_PlayerFuncs.ClientPrint(plr, HUD_PRINTTALK, "Possession is disabled on this map.\n");
+		return;
+	}
 
 	int timeSinceLast = int(g_Engine.time - g_player_states[eidx].lastPossess);
 	int cooldown = POSSESS_COOLDOWN - timeSinceLast;
@@ -885,38 +895,12 @@ void possess(CBasePlayer@ plr) {
 	
 	int oldSolid = phit.pev.solid;
 	phit.pev.solid = SOLID_NOT;
-	plr.EndRevive(0);
+	plr.Revive();
 	plr.pev.takedamage = DAMAGE_NO;
 	g_player_states[eidx].lastPossess = g_Engine.time;
 	copy_possessed_player(EHandle(plr), EHandle(phit), g_Engine.time, oldSolid, corpseInfo);
 }
 
-void move_corpse(EHandle h_deadPlayer, CorpseInfo corpseInfo) {
-	CBasePlayer@ plr = cast<CBasePlayer@>(h_deadPlayer.GetEntity());
-	if (plr is null) {
-		return;
-	}
-	
-	if (plr.GetObserver().IsObserver() && plr.GetObserver().HasCorpse()) {
-		CBaseEntity@ ent = null;
-		do {
-			@ent = g_EntityFuncs.FindEntityByClassname(ent, "deadplayer"); 
-			if (ent !is null) {
-				CustomKeyvalues@ pCustom = ent.GetCustomKeyvalues();
-				CustomKeyvalue ownerKey( pCustom.GetKeyvalue( "$i_hipoly_owner" ) );
-				
-				if (ownerKey.Exists() && ownerKey.GetInteger() == plr.entindex()) {
-					ent.pev.origin = corpseInfo.origin;
-					ent.pev.angles = corpseInfo.angles;
-					ent.pev.sequence = corpseInfo.sequence;
-					ent.pev.frame = corpseInfo.frame;
-					te_teleport(ent.pev.origin);
-					g_SoundSystem.PlaySound(ent.edict(), CHAN_STATIC, possess_snd, 1.0f, 0.5f, 0, 150);
-				}
-			}
-		} while (ent !is null);
-	}
-}
 
 void copy_possessed_player(EHandle h_ghost, EHandle h_target, float startTime, int oldSolid, CorpseInfo corpseInfo) {
 	CBasePlayer@ ghost = cast<CBasePlayer@>(h_ghost.GetEntity());
@@ -952,10 +936,18 @@ void copy_possessed_player(EHandle h_ghost, EHandle h_target, float startTime, i
 	ghost.pev.takedamage = DAMAGE_YES;
 	
 	if (target.IsAlive()) {
-		target.GetObserver().StartObserver(target.pev.origin, target.pev.v_angle, corpseInfo.hasCorpse);
+		// not starting observer mode because it might be crashing clients
+		target.Killed(g_EntityFuncs.Instance( 0 ).pev, GIB_NEVER);
 		
 		if (corpseInfo.hasCorpse) {
-			g_Scheduler.SetTimeout("move_corpse", 0.0f, h_target, corpseInfo);
+			target.pev.origin = corpseInfo.origin;
+			target.pev.angles = corpseInfo.angles;
+			target.pev.sequence = corpseInfo.sequence;
+			target.pev.frame = corpseInfo.frame;
+			te_teleport(target.pev.origin);
+			g_SoundSystem.PlaySound(target.edict(), CHAN_VOICE, possess_snd, 1.0f, 0.5f, 0, 150);
+		} else {
+			target.pev.effects |= EF_NODRAW;
 		}
 	}
 	
@@ -1062,7 +1054,7 @@ int doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand=fals
 		}
 		
 		if (isAdmin && args[0] == ".dreset") {			
-			println("\n\nENGINE TIME: " + g_Engine.time);
+			//println("\n\nENGINE TIME: " + g_Engine.time);
 			
 			for ( int i = 1; i <= g_Engine.maxClients; i++ )
 			{
