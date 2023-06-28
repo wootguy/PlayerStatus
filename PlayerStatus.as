@@ -7,6 +7,8 @@
 // - afk sprite change size
 // - show afk sprite for dead but not gibbed players
 
+#include "inc/RelaySay"
+
 void print(string text) { g_Game.AlertMessage( at_console, text); }
 void println(string text) { print(text + "\n"); }
 
@@ -70,7 +72,17 @@ int afk_possess_alive_time = 20;
 
 array<string> possess_map_blacklist = {
 	"fallguys_s2",
-	"fallguys_s3"
+	"fallguys_s3",
+	"sc5x_bonus",
+	"hideandseek",
+	"hide_in_grass_v2"
+};
+
+array<string> g_zzz_sprite_map_blacklist = {
+	"sc5x_bonus",
+	"hideandseek",
+	"hideandrape_v2",
+	"hide_in_grass_v2"
 };
 
 // time in seconds for different levels of afk
@@ -109,6 +121,9 @@ int KILL_AFK_IN_SURVIVAL_DELAY = 3; // how long to wait before killing the last 
 const int POSSESS_COOLDOWN = 30;
 
 CCVar@ cvar_afk_punish_time;
+
+bool g_precached = false;
+bool g_disable_zzz_sprite = false;
 
 void PluginInit()  {
 	g_Module.ScriptInfo.SetAuthor( "w00tguy" );
@@ -165,6 +180,9 @@ void MapInit() {
 	
 	last_afk_chat = -999;
 	g_afk_stats.clear();
+	g_precached = true;
+	
+	g_disable_zzz_sprite = g_zzz_sprite_map_blacklist.find(g_Engine.mapname) != -1;
 }
 
 void MapActivate() {
@@ -248,6 +266,10 @@ string getUniqueId(CBasePlayer@ plr) {
 }
 
 void update_player_status() {
+	if (!g_precached || g_disable_zzz_sprite) {
+		return;
+	}
+
 	for ( int i = 1; i <= g_Engine.maxClients; i++ )
 	{
 		CBasePlayer@ plr = g_PlayerFuncs.FindPlayerByIndex(i);
@@ -438,7 +460,7 @@ void update_player_status() {
 }
 
 void punish_afk_players() {
-	if (cvar_afk_punish_time.GetInt() == 0) {
+	if (cvar_afk_punish_time.GetInt() == 0 || !g_precached) {
 		return;
 	}
 
@@ -635,7 +657,7 @@ void detect_when_loaded(EHandle h_plr, Vector lastAngles, int angleKeyUpdates) {
 }
 
 void update_cross_plugin_state() {
-	if (g_Engine.time < 5.0f) {
+	if (g_Engine.time < 5.0f || !g_precached) {
 		return;
 	}
 
@@ -649,6 +671,9 @@ void update_cross_plugin_state() {
 	
 	CustomKeyvalues@ customKeys = afkEnt.GetCustomKeyvalues();
 	
+	uint32 afkTier1 = 0;
+	uint32 afkTier2 = 0;
+	
 	for ( int i = 1; i <= g_Engine.maxClients; i++ )
 	{
 		CBasePlayer@ plr = g_PlayerFuncs.FindPlayerByIndex(i);
@@ -661,11 +686,22 @@ void update_cross_plugin_state() {
 			afkTime = int(g_Engine.time - state.last_not_afk);
 			afkTime = afkTime >= afk_tier[0] ? afkTime : 0;
 			lagState = state.lag_state;
+			
+			if (afkTime >= afk_tier[0]) {
+				afkTier1 |= (1 << (plr.entindex() & 31));
+			}
+			if (afkTime >= afk_tier[1]) {
+				afkTier2 |= (1 << (plr.entindex() & 31));
+			}
 		}
 
 		customKeys.SetKeyvalue("$i_afk" + i, afkTime);
 		customKeys.SetKeyvalue("$i_state" + i, lagState);
 	}
+	
+	// for quickly checking if a player is afk
+	afkEnt.pev.renderfx = afkTier1;
+	afkEnt.pev.weapons = afkTier2;
 }
 
 CBasePlayer@ getAnyPlayer() 
@@ -844,7 +880,7 @@ void possess(CBasePlayer@ plr) {
 		return;
 	}
 	
-	if (possess_map_blacklist.find(g_Engine.mapname)) {
+	if (possess_map_blacklist.find(g_Engine.mapname) != -1) {
 		g_PlayerFuncs.ClientPrint(plr, HUD_PRINTTALK, "Possession is disabled on this map.\n");
 		return;
 	}
@@ -1111,20 +1147,25 @@ int doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand=fals
 			
 			if (totalAfk == 0) {
 				g_PlayerFuncs.SayTextAll(plr, "Nobody is AFK.\n");
+				RelaySay( "Nobody is AFK.\n");
 			}
 			else if (totalAfk == 1) {
 				g_PlayerFuncs.SayTextAll(plr, afkers[0] + " is AFK.\n");
+				RelaySay(afkers[0] + " is AFK.\n");
 			}
 			else if (totalAfk == 2) {
 				string afkString = afkers[0] + " and " + afkers[1];
 				g_PlayerFuncs.SayTextAll(plr, afkString + " are AFK.\n");
+				RelaySay(afkString + " are AFK.\n");
 			}
 			else if (totalAfk == 3) {
 				string afkString = afkers[0] + ", " + afkers[1] + ", and " + afkers[2];
 				g_PlayerFuncs.SayTextAll(plr, afkString + " are AFK (" + percent + "% of the server).\n");
+				RelaySay(afkString + " are AFK (" + percent + "% of the server).\n");
 			}
 			else {
 				g_PlayerFuncs.SayTextAll(plr, "" + totalAfk + " players are AFK (" + percent + "% of the server).\n");
+				RelaySay("" + totalAfk + " players are AFK (" + percent + "% of the server).\n");
 			}
 			
 			return 1;
