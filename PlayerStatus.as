@@ -63,6 +63,8 @@ float dial_loop_dur = 26.0; // duration of the dialup sound loop
 float last_afk_chat = -9999;
 int afk_possess_alive_time = 20;
 
+string ent_tname = "playerstatus_ent"; // for cleanup on plugin exit
+
 array<string> possess_map_blacklist = {
 	"fallguys_s2",
 	"fallguys_s3",
@@ -133,6 +135,34 @@ void PluginInit()  {
 	g_Scheduler.SetInterval("punish_afk_players", 1.0f, -1);
 	
 	@cvar_afk_punish_time = CCVar("afk_penalty_time", 60, "players afk for this long may be killed/kicked", ConCommandFlag::AdminOnly);
+}
+
+void PluginExit() {
+
+	CBaseEntity@ ent = null;
+	do {
+		@ent = g_EntityFuncs.FindEntityByTargetname(ent, ent_tname); 
+		if (ent !is null) {
+			g_EntityFuncs.Remove(ent);
+		}
+	} while (ent !is null);
+		
+	for ( int i = 1; i <= g_Engine.maxClients; i++ )
+	{
+		CBasePlayer@ plr = g_PlayerFuncs.FindPlayerByIndex(i);
+		
+		if (plr is null or !plr.IsConnected()) {
+			continue;
+		}
+		
+		PlayerState@ state = g_player_states[i];
+		
+		if (state.rendermode_applied) {
+			plr.pev.rendermode = state.render_info.rendermode;
+			plr.pev.renderamt = state.render_info.renderamt;
+			plr.pev.renderfx = state.render_info.renderfx;
+		}
+	}
 }
 
 void MapInit() {
@@ -259,6 +289,7 @@ void update_player_status() {
 				keys["framerate"] = "2";
 				keys["scale"] =  "0.25";
 				keys["spawnflags"] = "1";
+				keys["targetname"] = ent_tname;
 				CBaseEntity@ newLoadSprite = g_EntityFuncs.CreateEntity("env_sprite", keys, true);
 				state.loading_sprite = EHandle(newLoadSprite);
 			}
@@ -282,6 +313,7 @@ void update_player_status() {
 				keys["framerate"] = "" + loading_spr_framerate;
 				keys["scale"] = state.lag_state == LAG_JOINING ? "0.15" : ".50";
 				keys["spawnflags"] = "1";
+				keys["targetname"] = ent_tname;
 				CBaseEntity@ loadSprite = g_EntityFuncs.CreateEntity("env_sprite", keys, true);
 				state.loading_sprite = EHandle(loadSprite);
 				
@@ -346,6 +378,7 @@ void update_player_status() {
 					keys["framerate"] = "10";
 					keys["scale"] = ".15";
 					keys["spawnflags"] = "1";
+					keys["targetname"] = ent_tname;
 					CBaseEntity@ spr = g_EntityFuncs.CreateEntity("env_sprite", keys, true);
 					state.afk_sprite = EHandle(spr);
 				}
@@ -561,6 +594,7 @@ void update_cross_plugin_state() {
 	uint32 afkTier1 = 0;
 	uint32 afkTier2 = 0;
 	
+	// TODO: remove this custom key stuff and update other plugins that used it
 	for ( int i = 1; i <= g_Engine.maxClients; i++ )
 	{
 		CBasePlayer@ plr = g_PlayerFuncs.FindPlayerByIndex(i);
