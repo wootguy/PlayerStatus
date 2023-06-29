@@ -14,7 +14,6 @@ set(SOURCE_FILES
 	src/StartSound.h src/StartSound.cpp
 	src/meta_helper.h src/meta_helper.cpp
 	src/temp_ents.h src/temp_ents.cpp
-	src/RelaySay.h src/RelaySay.cpp
 )
 
 include_directories(src)

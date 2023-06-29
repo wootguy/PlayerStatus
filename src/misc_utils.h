@@ -58,3 +58,6 @@ CBaseEntity* FindEntityForward(CBaseEntity* ent, float maxDist);
 bool isValidFindEnt(edict_t* ent);
 
 void RemoveEntity(edict_t* ent);
+
+// send a message the angelscript chat bridge plugin
+void RelaySay(string message);
