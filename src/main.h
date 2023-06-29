@@ -1,6 +1,5 @@
 #pragma once
 #include "private_api.h"
-#include "meta_init.h"
 #include <vector>
 #include <set>
 #include <map>
