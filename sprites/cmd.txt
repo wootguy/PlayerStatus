@@ -1,0 +1,1 @@
+spriteguy zzz.png[-64,350] zzz_v2.spr type=upright
