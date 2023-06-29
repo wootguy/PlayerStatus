@@ -6,7 +6,6 @@
 #include "StartSound.h"
 #include "meta_helper.h"
 #include "temp_ents.h"
-#include "RelaySay.h"
 
 // Description of plugin
 plugin_info_t Plugin_info = {

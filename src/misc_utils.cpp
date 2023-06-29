@@ -3,6 +3,7 @@
 #include "studio.h"
 #include "Scheduler.h"
 #include "meta_helper.h"
+#include "meta_utils.h"
 
 string getFileExtension(string fpath) {
 	int dot = fpath.find_last_of(".");
@@ -394,4 +395,15 @@ void RemoveEntity(edict_t* ent) {
 			g_Scheduler.SetTimeout(RemoveEntityDelay, 0.0f, EHandle(ent));
 		}
 	}
+}
+
+void RelaySay(string message) {
+	std::remove(message.begin(), message.end(), '\n'); // stip any newlines, ChatBridge.as takes care
+	replaceString(message, "\"", "'"); // replace quotes so cvar is set correctly
+
+	logln(string("[RelaySay ") + Plugin_info.name + "]: " + message + "\n");
+
+	g_engfuncs.pfnCVarSetString("relay_say_msg", message.c_str());
+	g_engfuncs.pfnServerCommand(UTIL_VarArgs("as_command .relay_say %s\n", Plugin_info.name));
+	g_engfuncs.pfnServerExecute();
 }
