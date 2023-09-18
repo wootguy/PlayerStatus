@@ -251,7 +251,7 @@ void update_player_status() {
 		
 		PlayerState@ state = g_player_states[i];
 		
-		if (plr is null or !plr.IsConnected()) {
+		if (plr is null or !plr.IsConnected() or (plr.pev.flags & FL_FAKECLIENT) != 0) {
 			g_EntityFuncs.Remove(state.loading_sprite);
 			g_EntityFuncs.Remove(state.afk_sprite);
 			if (state.lag_state != LAG_NONE) {
@@ -658,8 +658,8 @@ HookReturnCode ClientLeave(CBasePlayer@ plr)
 	
 	float dur = g_Engine.time - g_player_states[idx].last_use;
 	if (dur > 1.0f) {
-		g_Game.AlertMessage(at_console, "[LagLog] " + plr.pev.netname + " disconnected after " + dur + " lag spike");
-		g_Game.AlertMessage(at_logged, "[LagLog] " + plr.pev.netname + " disconnected after " + dur + " lag spike");
+		g_Game.AlertMessage(at_console, "[LagLog] " + plr.pev.netname + " disconnected after " + dur + " lag spike\n");
+		g_Game.AlertMessage(at_logged, "[LagLog] " + plr.pev.netname + " disconnected after " + dur + " lag spike\n");
 	}
 		
 	
