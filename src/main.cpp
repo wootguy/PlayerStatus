@@ -502,10 +502,11 @@ void update_cross_plugin_state() {
 		afkEnt = CreateEntity("info_target", keys, true)->edict();
 	}
 
-	uint32 afkTier1 = 0;
-	uint32 afkTier2 = 0;
+	uint32_t afkTier1 = 0;
+	uint32_t afkTier2 = 0;
+	uint32_t isLoaded = 0;
 
-	// TODO: remove this custom key stuff && update other plugins that used it
+	// TODO: update other plugins that used the old custom keyvalues
 	for (int i = 1; i <= gpGlobals->maxClients; i++) {
 		CBasePlayer* plr = (CBasePlayer*)GET_PRIVATE(INDEXENT(i));
 
@@ -517,12 +518,16 @@ void update_cross_plugin_state() {
 			afkTime = int(gpGlobals->time - state.last_not_afk);
 			afkTime = afkTime >= afk_tier[0] ? afkTime : 0;
 			lagState = state.lag_state;
+			uint32_t plrBit = (1 << (plr->entindex() & 31));
 
 			if (afkTime >= afk_tier[0]) {
-				afkTier1 |= (1 << (plr->entindex() & 31));
+				afkTier1 |= plrBit;
 			}
 			if (afkTime >= afk_tier[1]) {
-				afkTier2 |= (1 << (plr->entindex() & 31));
+				afkTier2 |= plrBit;
+			}
+			if (lagState != LAG_JOINING) {
+				isLoaded |= plrBit;
 			}
 		}
 	}
@@ -530,6 +535,7 @@ void update_cross_plugin_state() {
 	// for quickly checking if a player is afk
 	afkEnt->v.renderfx = afkTier1;
 	afkEnt->v.weapons = afkTier2;
+	afkEnt->v.iuser4 = isLoaded;
 }
 
 
